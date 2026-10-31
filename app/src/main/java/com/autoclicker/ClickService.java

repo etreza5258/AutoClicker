@@ -1,4 +1,3 @@
-
 package com.autoclicker;
 
 import android.accessibilityservice.AccessibilityService;
@@ -11,8 +10,16 @@ import java.util.Calendar;
 
 public class ClickService extends AccessibilityService {
 
+    public static ClickService instance;
+
     private Handler handler = new Handler(Looper.getMainLooper());
     private Runnable task;
+
+    @Override
+    protected void onServiceConnected() {
+        super.onServiceConnected();
+        instance = this;
+    }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
@@ -23,22 +30,10 @@ public class ClickService extends AccessibilityService {
         stopClick();
     }
 
-    @Override
-    protected void onServiceConnected() {
-        super.onServiceConnected();
-    }
-
-    @Override
-    public int onStartCommand(android.content.Intent intent,
-                              int flags, int startId) {
-        if (intent == null) return START_NOT_STICKY;
-
-        int hour = intent.getIntExtra("hour", 12);
-        int minute = intent.getIntExtra("minute", 0);
-        int second = intent.getIntExtra("second", 0);
-        int count = intent.getIntExtra("count", 1);
-        int interval = intent.getIntExtra("interval", 100);
-
+    public void scheduleClick(
+        int hour, int minute, int second,
+        int count, int interval, int x, int y
+    ) {
         stopClick();
 
         Calendar target = Calendar.getInstance();
@@ -52,7 +47,7 @@ public class ClickService extends AccessibilityService {
         }
 
         long delay = target.getTimeInMillis()
-                - System.currentTimeMillis();
+            - System.currentTimeMillis();
 
         task = new Runnable() {
             int remaining = count;
@@ -64,17 +59,18 @@ public class ClickService extends AccessibilityService {
                     return;
                 }
 
-                performClick(500, 500);
+                performClick(x, y);
                 remaining--;
 
                 if (remaining > 0) {
                     handler.postDelayed(this, interval);
+                } else {
+                    task = null;
                 }
             }
         };
 
         handler.postDelayed(task, delay);
-        return START_NOT_STICKY;
     }
 
     private void performClick(float x, float y) {
@@ -82,12 +78,12 @@ public class ClickService extends AccessibilityService {
         path.moveTo(x, y);
 
         GestureDescription.Builder builder =
-                new GestureDescription.Builder();
+            new GestureDescription.Builder();
 
         builder.addStroke(
-                new GestureDescription.StrokeDescription(
-                        path, 0, 50
-                )
+            new GestureDescription.StrokeDescription(
+                path, 0, 50
+            )
         );
 
         dispatchGesture(builder.build(), null, null);
@@ -103,6 +99,7 @@ public class ClickService extends AccessibilityService {
     @Override
     public void onDestroy() {
         stopClick();
+        instance = null;
         super.onDestroy();
     }
 }
