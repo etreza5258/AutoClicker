@@ -25,8 +25,8 @@ jobs:
         with:
           gradle-version: 8.2
 
-      - name: Check Java files
-        run: find app/src/main/java -type f -print
+      - name: Show ClickService source
+        run: cat app/src/main/java/com/autoclicker/ClickService.java
 
       - name: Build APK
         run: gradle assembleDebug
