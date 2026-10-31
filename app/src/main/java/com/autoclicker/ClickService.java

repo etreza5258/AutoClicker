@@ -6,6 +6,7 @@ import android.graphics.Path;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.accessibility.AccessibilityEvent;
+
 import java.util.Calendar;
 
 public class ClickService extends AccessibilityService {
@@ -31,9 +32,14 @@ public class ClickService extends AccessibilityService {
     }
 
     public void scheduleClick(
-        int hour, int minute, int second,
-        int count, int interval, int x, int y
-    ) {
+            int hour,
+            int minute,
+            int second,
+            int count,
+            int interval,
+            int x,
+            int y) {
+
         stopClick();
 
         Calendar target = Calendar.getInstance();
@@ -47,13 +53,15 @@ public class ClickService extends AccessibilityService {
         }
 
         long delay = target.getTimeInMillis()
-            - System.currentTimeMillis();
+                - System.currentTimeMillis();
 
         task = new Runnable() {
+
             int remaining = count;
 
             @Override
             public void run() {
+
                 if (remaining <= 0) {
                     stopClick();
                     return;
@@ -74,22 +82,26 @@ public class ClickService extends AccessibilityService {
     }
 
     private void performClick(float x, float y) {
+
         Path path = new Path();
         path.moveTo(x, y);
 
         GestureDescription.Builder builder =
-            new GestureDescription.Builder();
+                new GestureDescription.Builder();
 
         builder.addStroke(
-            new GestureDescription.StrokeDescription(
-                path, 0, 50
-            )
+                new GestureDescription.StrokeDescription(
+                        path,
+                        0,
+                        50
+                )
         );
 
         dispatchGesture(builder.build(), null, null);
     }
 
     private void stopClick() {
+
         if (task != null) {
             handler.removeCallbacks(task);
             task = null;
@@ -98,8 +110,10 @@ public class ClickService extends AccessibilityService {
 
     @Override
     public void onDestroy() {
+
         stopClick();
         instance = null;
+
         super.onDestroy();
     }
 }
