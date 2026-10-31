@@ -1,0 +1,108 @@
+
+package com.autoclicker;
+
+import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.GestureDescription;
+import android.graphics.Path;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.accessibility.AccessibilityEvent;
+import java.util.Calendar;
+
+public class ClickService extends AccessibilityService {
+
+    private Handler handler = new Handler(Looper.getMainLooper());
+    private Runnable task;
+
+    @Override
+    public void onAccessibilityEvent(AccessibilityEvent event) {
+    }
+
+    @Override
+    public void onInterrupt() {
+        stopClick();
+    }
+
+    @Override
+    protected void onServiceConnected() {
+        super.onServiceConnected();
+    }
+
+    @Override
+    public int onStartCommand(android.content.Intent intent,
+                              int flags, int startId) {
+        if (intent == null) return START_NOT_STICKY;
+
+        int hour = intent.getIntExtra("hour", 12);
+        int minute = intent.getIntExtra("minute", 0);
+        int second = intent.getIntExtra("second", 0);
+        int count = intent.getIntExtra("count", 1);
+        int interval = intent.getIntExtra("interval", 100);
+
+        stopClick();
+
+        Calendar target = Calendar.getInstance();
+        target.set(Calendar.HOUR_OF_DAY, hour);
+        target.set(Calendar.MINUTE, minute);
+        target.set(Calendar.SECOND, second);
+        target.set(Calendar.MILLISECOND, 0);
+
+        if (target.getTimeInMillis() <= System.currentTimeMillis()) {
+            target.add(Calendar.DAY_OF_MONTH, 1);
+        }
+
+        long delay = target.getTimeInMillis()
+                - System.currentTimeMillis();
+
+        task = new Runnable() {
+            int remaining = count;
+
+            @Override
+            public void run() {
+                if (remaining <= 0) {
+                    stopClick();
+                    return;
+                }
+
+                performClick(500, 500);
+                remaining--;
+
+                if (remaining > 0) {
+                    handler.postDelayed(this, interval);
+                }
+            }
+        };
+
+        handler.postDelayed(task, delay);
+        return START_NOT_STICKY;
+    }
+
+    private void performClick(float x, float y) {
+        Path path = new Path();
+        path.moveTo(x, y);
+
+        GestureDescription.Builder builder =
+                new GestureDescription.Builder();
+
+        builder.addStroke(
+                new GestureDescription.StrokeDescription(
+                        path, 0, 50
+                )
+        );
+
+        dispatchGesture(builder.build(), null, null);
+    }
+
+    private void stopClick() {
+        if (task != null) {
+            handler.removeCallbacks(task);
+            task = null;
+        }
+    }
+
+    @Override
+    public void onDestroy() {
+        stopClick();
+        super.onDestroy();
+    }
+}
