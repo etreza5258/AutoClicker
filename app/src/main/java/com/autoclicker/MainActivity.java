@@ -7,6 +7,8 @@ import android.provider.Settings;
 import android.graphics.Color;
 import android.widget.*;
 
+import com.autoclicker.ClickService;
+
 public class MainActivity extends Activity {
 
     EditText hour, minute, second, count, interval, x, y;
