@@ -25,6 +25,9 @@ jobs:
         with:
           gradle-version: 8.2
 
+      - name: Check Java files
+        run: find app/src/main/java -type f -print
+
       - name: Build APK
         run: gradle assembleDebug
 
