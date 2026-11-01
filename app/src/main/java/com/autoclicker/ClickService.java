@@ -27,7 +27,9 @@ public class ClickService extends AccessibilityService {
 
     public static ClickService instance;
 
-    private Handler handler = new Handler(Looper.getMainLooper());
+    private final Handler handler =
+            new Handler(Looper.getMainLooper());
+
     private WindowManager windowManager;
 
     private View marker;
@@ -35,16 +37,19 @@ public class ClickService extends AccessibilityService {
 
     private LinearLayout floatingPanel;
     private WindowManager.LayoutParams panelParams;
+
     private TextView clockText;
     private TextView countdownText;
 
     private boolean markerAttached = false;
     private boolean panelAttached = false;
+    private boolean overlaysPassThrough = false;
 
     private int clickX = 500;
     private int clickY = 500;
 
     private int remainingCount = -1;
+
     private int intervalMs = 1;
     private int touchDurationMs = 1;
 
@@ -53,6 +58,7 @@ public class ClickService extends AccessibilityService {
 
     private boolean scheduled = false;
     private boolean durationMode = false;
+    private boolean gestureInProgress = false;
 
     private String displayStatus = "آماده";
 
@@ -64,6 +70,7 @@ public class ClickService extends AccessibilityService {
         super.onServiceConnected();
 
         instance = this;
+
         windowManager = (WindowManager)
                 getSystemService(WINDOW_SERVICE);
 
@@ -98,11 +105,14 @@ public class ClickService extends AccessibilityService {
                 PixelFormat.TRANSLUCENT
         );
 
-        markerParams.gravity = Gravity.TOP | Gravity.LEFT;
+        markerParams.gravity =
+                Gravity.TOP | Gravity.LEFT;
+
         markerParams.x = dp(100);
         markerParams.y = dp(250);
 
-        marker.setOnTouchListener(new View.OnTouchListener() {
+        marker.setOnTouchListener(
+                new View.OnTouchListener() {
 
             int startX, startY;
             float touchX, touchY;
@@ -145,6 +155,7 @@ public class ClickService extends AccessibilityService {
 
         windowManager.addView(marker, markerParams);
         markerAttached = true;
+
         updateClickPosition();
     }
 
@@ -169,7 +180,9 @@ public class ClickService extends AccessibilityService {
                 dp(12), dp(8), dp(12), dp(8)
         );
 
-        GradientDrawable background = new GradientDrawable();
+        GradientDrawable background =
+                new GradientDrawable();
+
         background.setColor(0xEE222222);
         background.setCornerRadius(dp(12));
         background.setStroke(dp(1), 0xFF777777);
@@ -209,12 +222,14 @@ public class ClickService extends AccessibilityService {
                 PixelFormat.TRANSLUCENT
         );
 
-        panelParams.gravity = Gravity.TOP | Gravity.RIGHT;
+        panelParams.gravity =
+                Gravity.TOP | Gravity.RIGHT;
+
         panelParams.x = dp(10);
         panelParams.y = dp(60);
 
-        // جابه‌جایی پنل با کشیدن قسمت ساعت
-        clockText.setOnTouchListener(new View.OnTouchListener() {
+        clockText.setOnTouchListener(
+                new View.OnTouchListener() {
 
             int startX, startY;
             float touchX, touchY;
@@ -244,6 +259,7 @@ public class ClickService extends AccessibilityService {
                                     floatingPanel, panelParams
                             );
                         }
+
                         return true;
 
                     case MotionEvent.ACTION_UP:
@@ -258,30 +274,72 @@ public class ClickService extends AccessibilityService {
         panelAttached = true;
     }
 
-    private void hideOverlaysForClick() {
+    private void makeOverlaysPassThrough() {
 
-        if (markerAttached && marker != null) {
-            windowManager.removeViewImmediate(marker);
-            markerAttached = false;
-        }
+        if (overlaysPassThrough) return;
 
-        if (panelAttached && floatingPanel != null) {
-            windowManager.removeViewImmediate(floatingPanel);
-            panelAttached = false;
+        try {
+
+            if (markerAttached && marker != null) {
+
+                markerParams.flags =
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+
+                windowManager.updateViewLayout(
+                        marker, markerParams
+                );
+            }
+
+            if (panelAttached && floatingPanel != null) {
+
+                panelParams.flags =
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+
+                windowManager.updateViewLayout(
+                        floatingPanel, panelParams
+                );
+            }
+
+            overlaysPassThrough = true;
+
+        } catch (Exception e) {
+            displayStatus = "خطای تنظیم پنجره";
         }
     }
 
-    private void restoreOverlays() {
+    private void restoreOverlayTouch() {
 
-        if (marker != null && !markerAttached) {
-            windowManager.addView(marker, markerParams);
-            markerAttached = true;
+        if (!overlaysPassThrough) return;
+
+        try {
+
+            if (markerAttached && marker != null) {
+
+                markerParams.flags =
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+
+                windowManager.updateViewLayout(
+                        marker, markerParams
+                );
+            }
+
+            if (panelAttached && floatingPanel != null) {
+
+                panelParams.flags =
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+
+                windowManager.updateViewLayout(
+                        floatingPanel, panelParams
+                );
+            }
+
+        } catch (Exception e) {
+            // سرویس ممکن است در حال بسته شدن باشد.
         }
 
-        if (floatingPanel != null && !panelAttached) {
-            windowManager.addView(floatingPanel, panelParams);
-            panelAttached = true;
-        }
+        overlaysPassThrough = false;
     }
 
     private void startClockUpdater() {
@@ -300,7 +358,8 @@ public class ClickService extends AccessibilityService {
                             );
 
                     clockText.setText(
-                            "ساعت: " + format.format(new Date())
+                            "ساعت: " +
+                                    format.format(new Date())
                     );
                 }
 
@@ -310,23 +369,32 @@ public class ClickService extends AccessibilityService {
 
                         long remaining;
 
-                        if (System.currentTimeMillis() < targetTime) {
+                        if (System.currentTimeMillis()
+                                < targetTime) {
+
                             remaining = targetTime -
                                     System.currentTimeMillis();
+
                         } else if (durationMode) {
+
                             remaining = Math.max(
                                     0,
-                                    endTime - System.currentTimeMillis()
+                                    endTime -
+                                            System.currentTimeMillis()
                             );
+
                         } else {
+
                             countdownText.setText("در حال کلیک");
-                            handler.postDelayed(this, 50);
+                            handler.postDelayed(this, 100);
                             return;
                         }
 
                         long hours = remaining / 3600000;
-                        long minutes = (remaining % 3600000) / 60000;
-                        long seconds = (remaining % 60000) / 1000;
+                        long minutes =
+                                (remaining % 3600000) / 60000;
+                        long seconds =
+                                (remaining % 60000) / 1000;
                         long millis = remaining % 1000;
 
                         countdownText.setText(
@@ -338,18 +406,18 @@ public class ClickService extends AccessibilityService {
                         );
 
                     } else {
+
                         countdownText.setText(displayStatus);
                     }
                 }
 
-                handler.postDelayed(this, 50);
+                handler.postDelayed(this, 100);
             }
         };
 
         handler.post(clockUpdater);
     }
 
-    // سازگاری با نسخه قبلی
     public void scheduleClick(
             int hour, int minute, int second,
             int count, int interval, int posX, int posY) {
@@ -363,7 +431,6 @@ public class ClickService extends AccessibilityService {
         );
     }
 
-    // سازگاری با نسخه قبلی
     public void scheduleClick(
             int hour, int minute, int second,
             int millisecond, int count, int interval) {
@@ -374,7 +441,6 @@ public class ClickService extends AccessibilityService {
         );
     }
 
-    // نسخه جدید زمان‌بندی
     public void scheduleClick(
             int hour,
             int minute,
@@ -395,8 +461,8 @@ public class ClickService extends AccessibilityService {
         target.set(Calendar.SECOND, second);
         target.set(Calendar.MILLISECOND, millisecond);
 
-        if (target.getTimeInMillis() <=
-                System.currentTimeMillis()) {
+        if (target.getTimeInMillis()
+                <= System.currentTimeMillis()) {
 
             target.add(Calendar.DAY_OF_MONTH, 1);
         }
@@ -406,12 +472,14 @@ public class ClickService extends AccessibilityService {
         durationMode = byDuration;
         remainingCount = byDuration ? -1 : count;
 
-        intervalMs = interval;
-        touchDurationMs = touchDuration;
+        intervalMs = Math.max(1, interval);
+        touchDurationMs = Math.max(1, touchDuration);
 
         endTime = targetTime + durationMs;
 
         scheduled = true;
+        gestureInProgress = false;
+
         displayStatus = "در انتظار زمان";
 
         clickTask = new Runnable() {
@@ -419,44 +487,44 @@ public class ClickService extends AccessibilityService {
             @Override
             public void run() {
 
-                if (!scheduled) return;
+                if (!scheduled || gestureInProgress) {
+                    return;
+                }
 
                 if (durationMode &&
                         System.currentTimeMillis() >= endTime) {
 
-                    scheduled = false;
-                    displayStatus = "پایان زمان";
+                    finishClick("پایان زمان");
                     return;
                 }
 
                 if (!durationMode && remainingCount <= 0) {
-
-                    scheduled = false;
-                    displayStatus = "پایان تعداد کلیک";
+                    finishClick("پایان تعداد کلیک");
                     return;
                 }
 
                 updateClickPosition();
 
-                displayStatus = "در حال ارسال لمس";
+                if (!overlaysPassThrough) {
+                    makeOverlaysPassThrough();
+                }
 
-                // پنجره‌ها موقتاً حذف می‌شوند تا لمس به برنامه مقصد برسد
-                hideOverlaysForClick();
+                displayStatus = "در حال کلیک";
+                gestureInProgress = true;
 
                 Path path = new Path();
                 path.moveTo(clickX, clickY);
-                path.lineTo(clickX + 1, clickY + 1);
 
                 GestureDescription.Builder builder =
                         new GestureDescription.Builder();
 
                 builder.addStroke(
                         new GestureDescription.StrokeDescription(
-                                path, 0, touchDurationMs
+                                path,
+                                0,
+                                touchDurationMs
                         )
                 );
-
-                Runnable currentTask = this;
 
                 boolean accepted = dispatchGesture(
                         builder.build(),
@@ -469,48 +537,36 @@ public class ClickService extends AccessibilityService {
 
                                 super.onCompleted(gesture);
 
-                                restoreOverlays();
+                                gestureInProgress = false;
 
-                                if (!scheduled) return;
-
-                                if (durationMode) {
-
-                                    if (System.currentTimeMillis()
-                                            >= endTime) {
-
-                                        scheduled = false;
-                                        displayStatus = "پایان زمان";
-
-                                    } else {
-
-                                        displayStatus = "در حال کلیک";
-
-                                        handler.postDelayed(
-                                                currentTask,
-                                                intervalMs
-                                        );
-                                    }
-
-                                } else {
-
-                                    remainingCount--;
-
-                                    if (remainingCount > 0) {
-
-                                        displayStatus = "لمس ارسال شد";
-
-                                        handler.postDelayed(
-                                                currentTask,
-                                                intervalMs
-                                        );
-
-                                    } else {
-
-                                        scheduled = false;
-                                        displayStatus =
-                                                "پایان تعداد کلیک";
-                                    }
+                                if (!scheduled) {
+                                    restoreOverlayTouch();
+                                    return;
                                 }
+
+                                if (!durationMode) {
+                                    remainingCount--;
+                                }
+
+                                if (durationMode &&
+                                        System.currentTimeMillis()
+                                                >= endTime) {
+
+                                    finishClick("پایان زمان");
+                                    return;
+                                }
+
+                                if (!durationMode &&
+                                        remainingCount <= 0) {
+
+                                    finishClick("پایان تعداد کلیک");
+                                    return;
+                                }
+
+                                handler.postDelayed(
+                                        clickTask,
+                                        intervalMs
+                                );
                             }
 
                             @Override
@@ -519,10 +575,8 @@ public class ClickService extends AccessibilityService {
 
                                 super.onCancelled(gesture);
 
-                                restoreOverlays();
-
-                                scheduled = false;
-                                displayStatus = "لمس لغو شد";
+                                gestureInProgress = false;
+                                finishClick("لمس لغو شد");
                             }
                         },
                         null
@@ -530,10 +584,8 @@ public class ClickService extends AccessibilityService {
 
                 if (!accepted) {
 
-                    restoreOverlays();
-
-                    scheduled = false;
-                    displayStatus = "فرمان لمس پذیرفته نشد";
+                    gestureInProgress = false;
+                    finishClick("فرمان لمس پذیرفته نشد");
                 }
             }
         };
@@ -546,21 +598,35 @@ public class ClickService extends AccessibilityService {
         handler.postDelayed(clickTask, delay);
     }
 
+    private void finishClick(String message) {
+
+        scheduled = false;
+        gestureInProgress = false;
+
+        if (clickTask != null) {
+            handler.removeCallbacks(clickTask);
+        }
+
+        displayStatus = message;
+        restoreOverlayTouch();
+    }
+
     public void stopClick() {
+
+        scheduled = false;
 
         if (clickTask != null) {
             handler.removeCallbacks(clickTask);
             clickTask = null;
         }
 
-        scheduled = false;
         targetTime = 0;
         endTime = 0;
         remainingCount = -1;
 
         displayStatus = "متوقف شد";
 
-        restoreOverlays();
+        restoreOverlayTouch();
 
         if (countdownText != null) {
             countdownText.setText(displayStatus);
