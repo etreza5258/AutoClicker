@@ -62,7 +62,8 @@ public class ClickService extends AccessibilityService {
     }
 
     private int dp(float value) {
-        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+        return (int) (value *
+                getResources().getDisplayMetrics().density + 0.5f);
     }
 
     private void showMarker() {
@@ -115,7 +116,10 @@ public class ClickService extends AccessibilityService {
                         markerParams.y = startY +
                                 (int) (event.getRawY() - touchY);
 
-                        windowManager.updateViewLayout(marker, markerParams);
+                        windowManager.updateViewLayout(
+                                marker, markerParams
+                        );
+
                         updateClickPosition();
                         return true;
 
@@ -210,17 +214,19 @@ public class ClickService extends AccessibilityService {
                                     Locale.getDefault()
                             );
 
-                    clockText.setText("ساعت: " +
-                            format.format(new Date()));
+                    clockText.setText(
+                            "ساعت: " + format.format(new Date())
+                    );
                 }
 
                 if (countdownText != null) {
 
                     if (scheduled) {
 
-                        long remaining =
-                                Math.max(0, targetTime -
-                                        System.currentTimeMillis());
+                        long remaining = Math.max(
+                                0,
+                                targetTime - System.currentTimeMillis()
+                        );
 
                         long hours = remaining / 3600000;
                         long minutes = (remaining % 3600000) / 60000;
@@ -247,7 +253,6 @@ public class ClickService extends AccessibilityService {
         handler.post(clockUpdater);
     }
 
-    // نسخه سازگار با کد قبلی MainActivity
     public void scheduleClick(
             int hour,
             int minute,
@@ -266,7 +271,6 @@ public class ClickService extends AccessibilityService {
         );
     }
 
-    // نسخه جدید با امکان تعیین میلی‌ثانیه
     public void scheduleClick(
             int hour,
             int minute,
@@ -306,6 +310,7 @@ public class ClickService extends AccessibilityService {
                 }
 
                 updateClickPosition();
+
                 performClick(clickX, clickY);
 
                 remainingCount--;
@@ -346,6 +351,7 @@ public class ClickService extends AccessibilityService {
 
         Path path = new Path();
         path.moveTo(x, y);
+        path.lineTo(x + 1, y + 1);
 
         GestureDescription.Builder builder =
                 new GestureDescription.Builder();
