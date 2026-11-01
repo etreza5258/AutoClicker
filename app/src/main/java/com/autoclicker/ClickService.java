@@ -34,8 +34,13 @@ public class ClickService extends AccessibilityService {
     private WindowManager.LayoutParams markerParams;
 
     private LinearLayout floatingPanel;
+    private WindowManager.LayoutParams panelParams;
+
     private TextView clockText;
     private TextView countdownText;
+
+    private boolean markerAttached = false;
+    private boolean panelAttached = false;
 
     private int clickX = 500;
     private int clickY = 500;
@@ -105,13 +110,10 @@ public class ClickService extends AccessibilityService {
                 switch (event.getAction()) {
 
                     case MotionEvent.ACTION_DOWN:
-
                         startX = markerParams.x;
                         startY = markerParams.y;
-
                         touchX = event.getRawX();
                         touchY = event.getRawY();
-
                         return true;
 
                     case MotionEvent.ACTION_MOVE:
@@ -130,7 +132,6 @@ public class ClickService extends AccessibilityService {
                         return true;
 
                     case MotionEvent.ACTION_UP:
-
                         updateClickPosition();
                         return true;
                 }
@@ -140,6 +141,7 @@ public class ClickService extends AccessibilityService {
         });
 
         windowManager.addView(marker, markerParams);
+        markerAttached = true;
         updateClickPosition();
     }
 
@@ -190,27 +192,52 @@ public class ClickService extends AccessibilityService {
         Button stopButton = new Button(this);
         stopButton.setText("توقف");
         stopButton.setTextSize(12);
-
         stopButton.setOnClickListener(v -> stopClick());
 
         floatingPanel.addView(clockText);
         floatingPanel.addView(countdownText);
         floatingPanel.addView(stopButton);
 
-        WindowManager.LayoutParams panelParams =
-                new WindowManager.LayoutParams(
-                        WindowManager.LayoutParams.WRAP_CONTENT,
-                        WindowManager.LayoutParams.WRAP_CONTENT,
-                        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                        PixelFormat.TRANSLUCENT
-                );
+        panelParams = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+        );
 
         panelParams.gravity = Gravity.TOP | Gravity.RIGHT;
         panelParams.x = dp(10);
         panelParams.y = dp(60);
 
         windowManager.addView(floatingPanel, panelParams);
+        panelAttached = true;
+    }
+
+    private void hideOverlaysForClick() {
+
+        if (markerAttached && marker != null) {
+            windowManager.removeViewImmediate(marker);
+            markerAttached = false;
+        }
+
+        if (panelAttached && floatingPanel != null) {
+            windowManager.removeViewImmediate(floatingPanel);
+            panelAttached = false;
+        }
+    }
+
+    private void restoreOverlays() {
+
+        if (marker != null && !markerAttached) {
+            windowManager.addView(marker, markerParams);
+            markerAttached = true;
+        }
+
+        if (floatingPanel != null && !panelAttached) {
+            windowManager.addView(floatingPanel, panelParams);
+            panelAttached = true;
+        }
     }
 
     private void startClockUpdater() {
@@ -262,7 +289,6 @@ public class ClickService extends AccessibilityService {
                         );
 
                     } else {
-
                         countdownText.setText(displayStatus);
                     }
                 }
@@ -338,17 +364,80 @@ public class ClickService extends AccessibilityService {
                 updateClickPosition();
 
                 displayStatus = "در حال ارسال لمس";
-                performClick(clickX, clickY);
 
-                remainingCount--;
+                // حذف موقت پنجره‌های شناور
+                hideOverlaysForClick();
 
-                if (remainingCount > 0) {
+                Path path = new Path();
+                path.moveTo(clickX, clickY);
+                path.lineTo(clickX + 1, clickY + 1);
 
-                    handler.postDelayed(this, intervalMs);
+                GestureDescription.Builder builder =
+                        new GestureDescription.Builder();
 
-                } else {
+                builder.addStroke(
+                        new GestureDescription.StrokeDescription(
+                                path, 0, 60
+                        )
+                );
+
+                Runnable currentTask = this;
+
+                boolean accepted = dispatchGesture(
+                        builder.build(),
+
+                        new GestureResultCallback() {
+
+                            @Override
+                            public void onCompleted(
+                                    GestureDescription gesture) {
+
+                                super.onCompleted(gesture);
+
+                                restoreOverlays();
+
+                                if (!scheduled) return;
+
+                                remainingCount--;
+
+                                if (remainingCount > 0) {
+
+                                    displayStatus = "لمس ارسال شد";
+
+                                    handler.postDelayed(
+                                            currentTask,
+                                            intervalMs
+                                    );
+
+                                } else {
+
+                                    scheduled = false;
+                                    displayStatus = "پایان - لمس ارسال شد";
+                                }
+                            }
+
+                            @Override
+                            public void onCancelled(
+                                    GestureDescription gesture) {
+
+                                super.onCancelled(gesture);
+
+                                restoreOverlays();
+
+                                scheduled = false;
+                                displayStatus = "لمس لغو شد";
+                            }
+                        },
+
+                        null
+                );
+
+                if (!accepted) {
+
+                    restoreOverlays();
 
                     scheduled = false;
+                    displayStatus = "فرمان لمس پذیرفته نشد";
                 }
             }
         };
@@ -374,64 +463,15 @@ public class ClickService extends AccessibilityService {
 
         displayStatus = "متوقف شد";
 
+        restoreOverlays();
+
         if (countdownText != null) {
             countdownText.setText(displayStatus);
         }
     }
 
-    private void performClick(float x, float y) {
-
-        Path path = new Path();
-
-        path.moveTo(x, y);
-        path.lineTo(x + 1, y + 1);
-
-        GestureDescription.Builder builder =
-                new GestureDescription.Builder();
-
-        builder.addStroke(
-                new GestureDescription.StrokeDescription(
-                        path,
-                        0,
-                        60
-                )
-        );
-
-        boolean accepted = dispatchGesture(
-                builder.build(),
-
-                new GestureResultCallback() {
-
-                    @Override
-                    public void onCompleted(
-                            GestureDescription gesture) {
-
-                        super.onCompleted(gesture);
-
-                        displayStatus = "لمس ارسال شد";
-                    }
-
-                    @Override
-                    public void onCancelled(
-                            GestureDescription gesture) {
-
-                        super.onCancelled(gesture);
-
-                        displayStatus = "لمس لغو شد";
-                    }
-                },
-
-                null
-        );
-
-        if (!accepted) {
-            displayStatus = "فرمان لمس پذیرفته نشد";
-        }
-    }
-
     @Override
-    public void onAccessibilityEvent(
-            AccessibilityEvent event) {
+    public void onAccessibilityEvent(AccessibilityEvent event) {
     }
 
     @Override
@@ -448,14 +488,14 @@ public class ClickService extends AccessibilityService {
             handler.removeCallbacks(clockUpdater);
         }
 
-        if (marker != null) {
+        if (markerAttached && marker != null) {
             windowManager.removeView(marker);
-            marker = null;
+            markerAttached = false;
         }
 
-        if (floatingPanel != null) {
+        if (panelAttached && floatingPanel != null) {
             windowManager.removeView(floatingPanel);
-            floatingPanel = null;
+            panelAttached = false;
         }
 
         instance = null;
