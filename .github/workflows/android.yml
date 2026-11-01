@@ -20,13 +20,14 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Install Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 8.2
-
-      - name: Show ClickService source
-        run: cat app/src/main/java/com/autoclicker/ClickService.java
+      - name: Find ClickService
+        run: |
+          echo "CURRENT BRANCH:"
+          git branch --show-current
+          echo "ALL MATCHING FILES:"
+          find . -iname '*ClickService*' -print
+          echo "JAVA DIRECTORY:"
+          find app/src/main/java -type f -print
 
       - name: Build APK
         run: gradle assembleDebug
