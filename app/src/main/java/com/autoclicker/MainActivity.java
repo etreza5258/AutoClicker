@@ -8,7 +8,7 @@ import android.provider.Settings;
 import android.graphics.Color;
 import android.view.Gravity;
 import android.view.View;
-import android.view.inputmethod.InputType;
+import android.text.InputType;
 import android.widget.*;
 import android.widget.AdapterView;
 
@@ -222,7 +222,8 @@ public class MainActivity extends Activity {
             int i = read(interval);
             int touch = read(touchDuration);
 
-            boolean timeMode = mode.getSelectedItemPosition() == 1;
+            boolean timeMode =
+                    mode.getSelectedItemPosition() == 1;
 
             int c = 1;
             long durationMs = 0;
@@ -262,7 +263,9 @@ public class MainActivity extends Activity {
                                 + dms;
 
                 if (durationMs <= 0) {
-                    status.setText("مدت زمان باید بیشتر از صفر باشد");
+                    status.setText(
+                            "مدت زمان باید بیشتر از صفر باشد"
+                    );
                     return;
                 }
 
@@ -271,13 +274,17 @@ public class MainActivity extends Activity {
                 c = read(count);
 
                 if (c < 1) {
-                    status.setText("تعداد کلیک باید حداقل ۱ باشد");
+                    status.setText(
+                            "تعداد کلیک باید حداقل ۱ باشد"
+                    );
                     return;
                 }
             }
 
             if (ClickService.instance == null) {
-                status.setText("ابتدا دسترسی‌پذیری را فعال کن");
+                status.setText(
+                        "ابتدا دسترسی‌پذیری را فعال کن"
+                );
                 return;
             }
 
@@ -296,7 +303,10 @@ public class MainActivity extends Activity {
             status.setText("زمان‌بندی ثبت شد");
 
         } catch (Exception e) {
-            status.setText("لطفاً همه مقادیر را بررسی کن");
+
+            status.setText(
+                    "لطفاً همه مقادیر را بررسی کن"
+            );
         }
     }
 }
