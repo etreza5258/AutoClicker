@@ -46,6 +46,8 @@ public class ClickService extends AccessibilityService {
     private long targetTime = 0;
     private boolean scheduled = false;
 
+    private String displayStatus = "آماده";
+
     private Runnable clickTask;
     private Runnable clockUpdater;
 
@@ -54,7 +56,8 @@ public class ClickService extends AccessibilityService {
         super.onServiceConnected();
 
         instance = this;
-        windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+        windowManager = (WindowManager)
+                getSystemService(WINDOW_SERVICE);
 
         showMarker();
         showFloatingPanel();
@@ -102,10 +105,13 @@ public class ClickService extends AccessibilityService {
                 switch (event.getAction()) {
 
                     case MotionEvent.ACTION_DOWN:
+
                         startX = markerParams.x;
                         startY = markerParams.y;
+
                         touchX = event.getRawX();
                         touchY = event.getRawY();
+
                         return true;
 
                     case MotionEvent.ACTION_MOVE:
@@ -124,6 +130,7 @@ public class ClickService extends AccessibilityService {
                         return true;
 
                     case MotionEvent.ACTION_UP:
+
                         updateClickPosition();
                         return true;
                 }
@@ -153,7 +160,9 @@ public class ClickService extends AccessibilityService {
 
         floatingPanel = new LinearLayout(this);
         floatingPanel.setOrientation(LinearLayout.VERTICAL);
-        floatingPanel.setPadding(dp(12), dp(8), dp(12), dp(8));
+        floatingPanel.setPadding(
+                dp(12), dp(8), dp(12), dp(8)
+        );
 
         GradientDrawable background = new GradientDrawable();
         background.setColor(0xEE222222);
@@ -166,17 +175,22 @@ public class ClickService extends AccessibilityService {
         clockText.setTextColor(Color.WHITE);
         clockText.setTextSize(15);
         clockText.setGravity(Gravity.CENTER);
-        clockText.setTypeface(android.graphics.Typeface.MONOSPACE);
+        clockText.setTypeface(
+                android.graphics.Typeface.MONOSPACE
+        );
 
         countdownText = new TextView(this);
         countdownText.setTextColor(0xFF66CCFF);
         countdownText.setTextSize(17);
         countdownText.setGravity(Gravity.CENTER);
-        countdownText.setTypeface(android.graphics.Typeface.MONOSPACE);
+        countdownText.setTypeface(
+                android.graphics.Typeface.MONOSPACE
+        );
 
         Button stopButton = new Button(this);
         stopButton.setText("توقف");
         stopButton.setTextSize(12);
+
         stopButton.setOnClickListener(v -> stopClick());
 
         floatingPanel.addView(clockText);
@@ -225,24 +239,31 @@ public class ClickService extends AccessibilityService {
 
                         long remaining = Math.max(
                                 0,
-                                targetTime - System.currentTimeMillis()
+                                targetTime -
+                                        System.currentTimeMillis()
                         );
 
                         long hours = remaining / 3600000;
-                        long minutes = (remaining % 3600000) / 60000;
-                        long seconds = (remaining % 60000) / 1000;
+                        long minutes =
+                                (remaining % 3600000) / 60000;
+                        long seconds =
+                                (remaining % 60000) / 1000;
                         long millis = remaining % 1000;
 
                         countdownText.setText(
                                 String.format(
                                         Locale.US,
                                         "%02d : %02d : %02d . %03d",
-                                        hours, minutes, seconds, millis
+                                        hours,
+                                        minutes,
+                                        seconds,
+                                        millis
                                 )
                         );
 
-                    } else if (remainingCount == 0) {
-                        countdownText.setText("پایان");
+                    } else {
+
+                        countdownText.setText(displayStatus);
                     }
                 }
 
@@ -288,14 +309,18 @@ public class ClickService extends AccessibilityService {
         target.set(Calendar.SECOND, second);
         target.set(Calendar.MILLISECOND, millisecond);
 
-        if (target.getTimeInMillis() <= System.currentTimeMillis()) {
+        if (target.getTimeInMillis() <=
+                System.currentTimeMillis()) {
+
             target.add(Calendar.DAY_OF_MONTH, 1);
         }
 
         targetTime = target.getTimeInMillis();
         remainingCount = count;
         intervalMs = interval;
+
         scheduled = true;
+        displayStatus = "در انتظار زمان";
 
         clickTask = new Runnable() {
 
@@ -306,18 +331,23 @@ public class ClickService extends AccessibilityService {
 
                 if (remainingCount <= 0) {
                     scheduled = false;
+                    displayStatus = "پایان";
                     return;
                 }
 
                 updateClickPosition();
 
+                displayStatus = "در حال ارسال لمس";
                 performClick(clickX, clickY);
 
                 remainingCount--;
 
                 if (remainingCount > 0) {
+
                     handler.postDelayed(this, intervalMs);
+
                 } else {
+
                     scheduled = false;
                 }
             }
@@ -342,14 +372,17 @@ public class ClickService extends AccessibilityService {
         targetTime = 0;
         remainingCount = -1;
 
+        displayStatus = "متوقف شد";
+
         if (countdownText != null) {
-            countdownText.setText("متوقف شد");
+            countdownText.setText(displayStatus);
         }
     }
 
     private void performClick(float x, float y) {
 
         Path path = new Path();
+
         path.moveTo(x, y);
         path.lineTo(x + 1, y + 1);
 
@@ -364,11 +397,41 @@ public class ClickService extends AccessibilityService {
                 )
         );
 
-        dispatchGesture(builder.build(), null, null);
+        boolean accepted = dispatchGesture(
+                builder.build(),
+
+                new GestureResultCallback() {
+
+                    @Override
+                    public void onCompleted(
+                            GestureDescription gesture) {
+
+                        super.onCompleted(gesture);
+
+                        displayStatus = "لمس ارسال شد";
+                    }
+
+                    @Override
+                    public void onCancelled(
+                            GestureDescription gesture) {
+
+                        super.onCancelled(gesture);
+
+                        displayStatus = "لمس لغو شد";
+                    }
+                },
+
+                null
+        );
+
+        if (!accepted) {
+            displayStatus = "فرمان لمس پذیرفته نشد";
+        }
     }
 
     @Override
-    public void onAccessibilityEvent(AccessibilityEvent event) {
+    public void onAccessibilityEvent(
+            AccessibilityEvent event) {
     }
 
     @Override
