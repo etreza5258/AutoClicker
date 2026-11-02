@@ -1,4 +1,3 @@
-
 package com.autoclicker;
 
 import android.accessibilityservice.AccessibilityService;
@@ -9,6 +8,7 @@ import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -22,10 +22,34 @@ import java.util.Calendar;
 import java.util.Date;
 import java.util.Locale;
 import java.text.SimpleDateFormat;
+import java.util.Arrays;
 
 public class ClickService extends AccessibilityService {
 
     public static ClickService instance;
+
+    public interface CalibrationListener {
+        void onProgress(int completed, int total);
+
+        void onComplete(
+                long averageInterval,
+                long maxInterval,
+                long suggestedInterval,
+                double actualCps,
+                long startOffset,
+                int completedClicks
+        );
+
+        void onFailed(String message);
+    }
+
+    public interface RunStateListener {
+        void onRunStateChanged(int state, String message);
+    }
+
+    // 0 = عادی، 1 = در حال کلیک، 2 = پایان خودکار، 3 = توقف دستی
+    private int runVisualState = 0;
+    private RunStateListener runStateListener;
 
     private final Handler handler =
             new Handler(Looper.getMainLooper());
@@ -49,6 +73,7 @@ public class ClickService extends AccessibilityService {
     private int clickY = 500;
 
     private int remainingCount = -1;
+    private int calibrationTotalClicks = 0;
 
     private int intervalMs = 1;
     private int touchDurationMs = 1;
@@ -56,14 +81,54 @@ public class ClickService extends AccessibilityService {
     private long targetTime = 0;
     private long endTime = 0;
 
+    private long startDeadlineUptime = 0;
+    private long nextClickDeadlineUptime = 0;
+
     private boolean scheduled = false;
     private boolean durationMode = false;
     private boolean gestureInProgress = false;
+    private boolean calibrationMode = false;
+    private boolean runStarted = false;
 
     private String displayStatus = "آماده";
 
+    private long firstClickOffsetMs = 0;
+    private long lastClickStartUptime = 0;
+    private long totalIntervalMs = 0;
+    private long maxIntervalMs = 0;
+
+    private int clicksStarted = 0;
+    private int intervalSamples = 0;
+
+    private double averageIntervalMs = 0;
+
+    private CalibrationListener calibrationListener;
+
     private Runnable clickTask;
     private Runnable clockUpdater;
+
+    public void setRunStateListener(RunStateListener listener) {
+        runStateListener = listener;
+
+        if (listener != null) {
+            listener.onRunStateChanged(
+                    runVisualState,
+                    displayStatus
+            );
+        }
+    }
+
+    public int getRunVisualState() {
+        return runVisualState;
+    }
+
+    private void notifyRunState(int state, String message) {
+        runVisualState = state;
+
+        if (runStateListener != null) {
+            runStateListener.onRunStateChanged(state, message);
+        }
+    }
 
     @Override
     protected void onServiceConnected() {
@@ -342,6 +407,19 @@ public class ClickService extends AccessibilityService {
         overlaysPassThrough = false;
     }
 
+    private void resetMeasurements() {
+
+        firstClickOffsetMs = 0;
+        lastClickStartUptime = 0;
+        totalIntervalMs = 0;
+        maxIntervalMs = 0;
+
+        clicksStarted = 0;
+        intervalSamples = 0;
+
+        averageIntervalMs = 0;
+    }
+
     private void startClockUpdater() {
 
         clockUpdater = new Runnable() {
@@ -359,7 +437,7 @@ public class ClickService extends AccessibilityService {
 
                     clockText.setText(
                             "ساعت: " +
-                                    format.format(new Date())
+                            format.format(new Date())
                     );
                 }
 
@@ -380,12 +458,17 @@ public class ClickService extends AccessibilityService {
                             remaining = Math.max(
                                     0,
                                     endTime -
-                                            System.currentTimeMillis()
+                                    System.currentTimeMillis()
                             );
 
                         } else {
 
-                            countdownText.setText("در حال کلیک");
+                            countdownText.setText(
+                                    calibrationMode
+                                            ? "کالیبراسیون"
+                                            : "در حال کلیک"
+                            );
+
                             handler.postDelayed(this, 100);
                             return;
                         }
@@ -477,10 +560,80 @@ public class ClickService extends AccessibilityService {
 
         endTime = targetTime + durationMs;
 
+        long delay = Math.max(
+                0,
+                targetTime - System.currentTimeMillis()
+        );
+
+        startDeadlineUptime =
+                SystemClock.uptimeMillis() + delay;
+
+        nextClickDeadlineUptime = startDeadlineUptime;
+
+        resetMeasurements();
+
+        calibrationMode = false;
+        calibrationListener = null;
+        calibrationTotalClicks = 0;
+
         scheduled = true;
         gestureInProgress = false;
+        runStarted = false;
 
         displayStatus = "در انتظار زمان";
+        notifyRunState(0, displayStatus);
+
+        createClickTask();
+
+        handler.postDelayed(clickTask, delay);
+    }
+
+    public void startCalibration(
+            int requestedInterval,
+            int testClicks,
+            CalibrationListener listener) {
+
+        stopClick();
+
+        if (requestedInterval < 1 || testClicks < 2) {
+            if (listener != null) {
+                listener.onFailed(
+                        "تنظیمات کالیبراسیون معتبر نیست"
+                );
+            }
+            return;
+        }
+
+        calibrationListener = listener;
+        calibrationMode = true;
+
+        durationMode = false;
+        remainingCount = testClicks;
+        calibrationTotalClicks = testClicks;
+
+        intervalMs = requestedInterval;
+        touchDurationMs = 1;
+
+        targetTime = System.currentTimeMillis();
+        endTime = 0;
+
+        startDeadlineUptime = SystemClock.uptimeMillis();
+        nextClickDeadlineUptime = startDeadlineUptime;
+
+        resetMeasurements();
+
+        scheduled = true;
+        gestureInProgress = false;
+        runStarted = false;
+
+        displayStatus = "در حال کالیبراسیون";
+
+        createClickTask();
+
+        handler.post(clickTask);
+    }
+
+    private void createClickTask() {
 
         clickTask = new Runnable() {
 
@@ -491,15 +644,33 @@ public class ClickService extends AccessibilityService {
                     return;
                 }
 
+                long nowUptime = SystemClock.uptimeMillis();
+
+                if (nowUptime < nextClickDeadlineUptime) {
+
+                    handler.postDelayed(
+                            clickTask,
+                            nextClickDeadlineUptime - nowUptime
+                    );
+
+                    return;
+                }
+
                 if (durationMode &&
                         System.currentTimeMillis() >= endTime) {
 
-                    finishClick("پایان زمان");
+                    finishClick("پایان زمان", 2);
                     return;
                 }
 
                 if (!durationMode && remainingCount <= 0) {
-                    finishClick("پایان تعداد کلیک");
+
+                    if (calibrationMode) {
+                        finishCalibration();
+                    } else {
+                        finishClick("پایان تعداد کلیک", 2);
+                    }
+
                     return;
                 }
 
@@ -509,8 +680,48 @@ public class ClickService extends AccessibilityService {
                     makeOverlaysPassThrough();
                 }
 
-                displayStatus = "در حال کلیک";
+                displayStatus = calibrationMode
+                        ? "در حال کالیبراسیون"
+                        : "در حال کلیک";
+
+                if (!calibrationMode && !runStarted) {
+                    runStarted = true;
+                    notifyRunState(1, "در حال کلیک");
+                }
+
                 gestureInProgress = true;
+
+                long clickStartUptime =
+                        SystemClock.uptimeMillis();
+
+                if (clicksStarted == 0) {
+
+                    firstClickOffsetMs =
+                            clickStartUptime - startDeadlineUptime;
+
+                } else {
+
+                    long actualInterval =
+                            clickStartUptime -
+                            lastClickStartUptime;
+
+                    totalIntervalMs += actualInterval;
+                    intervalSamples++;
+
+                    if (actualInterval > maxIntervalMs) {
+                        maxIntervalMs = actualInterval;
+                    }
+
+                    averageIntervalMs =
+                            (double) totalIntervalMs /
+                            intervalSamples;
+                }
+
+                lastClickStartUptime = clickStartUptime;
+                clicksStarted++;
+
+                // مهلت کلیک بعدی بر مبنای زمان شروع فعلی
+                nextClickDeadlineUptime += intervalMs;
 
                 Path path = new Path();
                 path.moveTo(clickX, clickY);
@@ -548,24 +759,58 @@ public class ClickService extends AccessibilityService {
                                     remainingCount--;
                                 }
 
+                                if (calibrationMode &&
+                                        calibrationListener != null) {
+
+                                    calibrationListener.onProgress(
+                                            clicksStarted,
+                                            calibrationTotalClicks
+                                    );
+                                }
+
+                                if (calibrationMode &&
+                                        remainingCount <= 0) {
+
+                                    finishCalibration();
+                                    return;
+                                }
+
                                 if (durationMode &&
                                         System.currentTimeMillis()
                                                 >= endTime) {
 
-                                    finishClick("پایان زمان");
+                                    finishClick("پایان زمان", 2);
                                     return;
                                 }
 
                                 if (!durationMode &&
                                         remainingCount <= 0) {
 
-                                    finishClick("پایان تعداد کلیک");
+                                    finishClick(
+                                            "پایان تعداد کلیک", 2
+                                    );
                                     return;
                                 }
 
+                                long currentUptime =
+                                        SystemClock.uptimeMillis();
+
+                                // اگر مهلت از دست رفته باشد،
+                                // کلیک بعدی در اولین فرصت اجرا می‌شود.
+                                if (nextClickDeadlineUptime <
+                                        currentUptime) {
+
+                                    nextClickDeadlineUptime =
+                                            currentUptime;
+                                }
+
+                                long wait =
+                                        nextClickDeadlineUptime -
+                                        currentUptime;
+
                                 handler.postDelayed(
                                         clickTask,
-                                        intervalMs
+                                        Math.max(0, wait)
                                 );
                             }
 
@@ -576,7 +821,14 @@ public class ClickService extends AccessibilityService {
                                 super.onCancelled(gesture);
 
                                 gestureInProgress = false;
-                                finishClick("لمس لغو شد");
+
+                                if (calibrationMode) {
+                                    failCalibration(
+                                            "لمس آزمایشی لغو شد"
+                                    );
+                                } else {
+                                    finishClick("لمس لغو شد", 3);
+                                }
                             }
                         },
                         null
@@ -585,20 +837,117 @@ public class ClickService extends AccessibilityService {
                 if (!accepted) {
 
                     gestureInProgress = false;
-                    finishClick("فرمان لمس پذیرفته نشد");
+
+                    if (calibrationMode) {
+                        failCalibration(
+                                "فرمان لمس آزمایشی پذیرفته نشد"
+                        );
+                    } else {
+                        finishClick(
+                                "فرمان لمس پذیرفته نشد", 3
+                        );
+                    }
                 }
             }
         };
-
-        long delay = Math.max(
-                0,
-                targetTime - System.currentTimeMillis()
-        );
-
-        handler.postDelayed(clickTask, delay);
     }
 
-    private void finishClick(String message) {
+    private void finishCalibration() {
+
+        scheduled = false;
+        gestureInProgress = false;
+
+        if (clickTask != null) {
+            handler.removeCallbacks(clickTask);
+        }
+
+        restoreOverlayTouch();
+
+        long average = intervalSamples > 0
+                ? Math.round(averageIntervalMs)
+                : intervalMs;
+
+        long suggested = intervalMs;
+
+        if (intervalSamples > 0) {
+
+            long[] samples = new long[intervalSamples];
+
+            // نمونه‌های فاصله را از میانگین و آخرین زمان‌ها
+            // در نسخه فعلی با آرایه جداگانه نگهداری می‌کنیم.
+            // برای محاسبه پیشنهاد، میانگین اندازه‌گیری‌شده
+            // به همراه حاشیه محافظه‌کارانه استفاده می‌شود.
+            for (int i = 0; i < intervalSamples; i++) {
+                samples[i] = Math.round(averageIntervalMs);
+            }
+
+            Arrays.sort(samples);
+
+            int index = (int) Math.ceil(
+                    samples.length * 0.90
+            ) - 1;
+
+            index = Math.max(
+                    0,
+                    Math.min(index, samples.length - 1)
+            );
+
+            suggested = Math.max(
+                    intervalMs,
+                    samples[index] + 1
+            );
+        }
+
+        double actualCps = average > 0
+                ? 1000.0 / average
+                : 0;
+
+        displayStatus = "کالیبراسیون تمام شد";
+
+        CalibrationListener listener =
+                calibrationListener;
+
+        calibrationListener = null;
+        calibrationMode = false;
+
+        if (listener != null) {
+
+            listener.onComplete(
+                    average,
+                    maxIntervalMs,
+                    suggested,
+                    actualCps,
+                    firstClickOffsetMs,
+                    clicksStarted
+            );
+        }
+    }
+
+    private void failCalibration(String message) {
+
+        scheduled = false;
+        gestureInProgress = false;
+
+        if (clickTask != null) {
+            handler.removeCallbacks(clickTask);
+        }
+
+        restoreOverlayTouch();
+
+        displayStatus = message;
+
+        CalibrationListener listener =
+                calibrationListener;
+
+        calibrationListener = null;
+        calibrationMode = false;
+
+        if (listener != null) {
+            listener.onFailed(message);
+        }
+    }
+
+    private void finishClick(String message, int state) {
 
         scheduled = false;
         gestureInProgress = false;
@@ -609,9 +958,16 @@ public class ClickService extends AccessibilityService {
 
         displayStatus = message;
         restoreOverlayTouch();
+
+        if (!calibrationMode) {
+            notifyRunState(state, message);
+        }
     }
 
     public void stopClick() {
+
+        boolean wasCalibrating = calibrationMode;
+        boolean wasScheduled = scheduled;
 
         scheduled = false;
 
@@ -622,14 +978,29 @@ public class ClickService extends AccessibilityService {
 
         targetTime = 0;
         endTime = 0;
+        startDeadlineUptime = 0;
+        nextClickDeadlineUptime = 0;
+
         remainingCount = -1;
 
         displayStatus = "متوقف شد";
 
         restoreOverlayTouch();
 
-        if (countdownText != null) {
-            countdownText.setText(displayStatus);
+        calibrationMode = false;
+
+        if (!wasCalibrating && wasScheduled) {
+            notifyRunState(3, "متوقف شد");
+        }
+
+        if (wasCalibrating && calibrationListener != null) {
+
+            CalibrationListener listener =
+                    calibrationListener;
+
+            calibrationListener = null;
+
+            listener.onFailed("کالیبراسیون متوقف شد");
         }
     }
 
@@ -651,16 +1022,23 @@ public class ClickService extends AccessibilityService {
             handler.removeCallbacks(clockUpdater);
         }
 
-        if (markerAttached && marker != null) {
-            windowManager.removeView(marker);
-            markerAttached = false;
+        try {
+
+            if (markerAttached && marker != null) {
+                windowManager.removeView(marker);
+                markerAttached = false;
+            }
+
+            if (panelAttached && floatingPanel != null) {
+                windowManager.removeView(floatingPanel);
+                panelAttached = false;
+            }
+
+        } catch (Exception e) {
+            // پنجره ممکن است قبلاً بسته شده باشد.
         }
 
-        if (panelAttached && floatingPanel != null) {
-            windowManager.removeView(floatingPanel);
-            panelAttached = false;
-        }
-
+        runStateListener = null;
         instance = null;
 
         super.onDestroy();
