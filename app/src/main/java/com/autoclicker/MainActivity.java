@@ -1,4 +1,3 @@
-
 package com.autoclicker;
 
 import android.app.Activity;
@@ -13,11 +12,13 @@ import android.text.InputType;
 import android.widget.*;
 import java.util.Locale;
 
-public class MainActivity extends Activity implements ClickService.RunStateListener {
+public class MainActivity extends Activity
+        implements ClickService.RunStateListener {
 
     private EditText hour, minute, second, millisecond;
     private EditText count, interval, touchDuration;
-    private EditText durationHour, durationMinute, durationSecond, durationMs;
+    private EditText durationHour, durationMinute;
+    private EditText durationSecond, durationMs;
     private EditText desiredCps;
 
     private LinearLayout durationContainer;
@@ -25,6 +26,12 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
     private Spinner modeSpinner;
 
     private int mode = 0;
+    private long suggestedInterval = -1;
+
+    private int dp(float value) {
+        return (int) (value *
+                getResources().getDisplayMetrics().density + 0.5f);
+    }
 
     private EditText numberField(String hint, int value) {
         EditText e = new EditText(this);
@@ -32,6 +39,7 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
         e.setInputType(InputType.TYPE_CLASS_NUMBER);
         e.setHint(hint);
         e.setText(String.valueOf(value));
+        e.setTextColor(Color.BLACK);
         e.setEms(5);
         return e;
     }
@@ -40,14 +48,14 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
         LinearLayout l = new LinearLayout(this);
         l.setOrientation(LinearLayout.HORIZONTAL);
         l.setGravity(Gravity.CENTER_VERTICAL);
-        l.setPadding(0, 4, 0, 4);
+        l.setPadding(0, dp(3), 0, dp(3));
         return l;
     }
 
     private void addField(LinearLayout parent, EditText field) {
         LinearLayout.LayoutParams p =
                 new LinearLayout.LayoutParams(0, -2, 1);
-        p.setMargins(3, 0, 3, 0);
+        p.setMargins(dp(3), 0, dp(3), 0);
         parent.addView(field, p);
     }
 
@@ -56,7 +64,7 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
         t.setText(text);
         t.setTextSize(size);
         t.setTextColor(Color.BLACK);
-        t.setPadding(0, 8, 0, 4);
+        t.setPadding(0, dp(7), 0, dp(4));
         return t;
     }
 
@@ -68,16 +76,52 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
 
     private int value(EditText e, int fallback) {
         try {
-            return Integer.parseInt(e.getText().toString().trim());
+            return Integer.parseInt(
+                    e.getText().toString().trim());
         } catch (Exception ex) {
             return fallback;
         }
+    }
+
+    private GradientDrawable background(
+            int color, int strokeColor) {
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(color);
+        bg.setCornerRadius(dp(12));
+        bg.setStroke(dp(1), strokeColor);
+        return bg;
+    }
+
+    private LinearLayout createCard(
+            LinearLayout parent, String title) {
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(12), dp(8), dp(12), dp(10));
+        card.setBackground(background(
+                Color.WHITE, 0xFFDDDDDD));
+
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        -1, -2);
+
+        params.setMargins(0, dp(6), 0, dp(6));
+        parent.addView(card, params);
+
+        TextView heading = label(title, 17);
+        heading.setTypeface(null,
+                android.graphics.Typeface.BOLD);
+        card.addView(heading);
+
+        return card;
     }
 
     private void setDurationColor(int state) {
         if (durationContainer == null) return;
 
         int color;
+
         if (state == 1) {
             color = Color.rgb(190, 240, 195);
         } else if (state == 2) {
@@ -88,11 +132,8 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
             color = Color.rgb(235, 235, 235);
         }
 
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(color);
-        bg.setCornerRadius(14);
-        bg.setStroke(1, Color.LTGRAY);
-        durationContainer.setBackground(bg);
+        durationContainer.setBackground(
+                background(color, Color.LTGRAY));
     }
 
     @Override
@@ -100,18 +141,34 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
         super.onCreate(savedInstanceState);
 
         ScrollView scroll = new ScrollView(this);
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(16, 12, 16, 20);
+        root.setPadding(dp(14), dp(10), dp(14), dp(20));
+        root.setBackgroundColor(0xFFF3F5F7);
+
         scroll.addView(root);
 
-        TextView title = label("AutoClicker", 24);
+        TextView title = label("AutoClicker", 25);
         title.setGravity(Gravity.CENTER);
+        title.setTypeface(null,
+                android.graphics.Typeface.BOLD);
         root.addView(title);
 
-        root.addView(label("زمان شروع کلیک بر اساس ساعت گوشی", 16));
+        TextView subtitle = label(
+                "کلیک زمان‌بندی‌شده با ساعت گوشی", 13);
+        subtitle.setGravity(Gravity.CENTER);
+        root.addView(subtitle);
+
+        // کارت زمان شروع
+        LinearLayout timeCard =
+                createCard(root, "۱. زمان شروع");
+
+        timeCard.addView(label(
+                "ساعت / دقیقه / ثانیه / میلی‌ثانیه", 13));
 
         LinearLayout startTime = horizontal();
+
         hour = numberField("ساعت", 12);
         minute = numberField("دقیقه", 0);
         second = numberField("ثانیه", 0);
@@ -121,37 +178,50 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
         addField(startTime, minute);
         addField(startTime, second);
         addField(startTime, millisecond);
-        root.addView(startTime);
 
-        root.addView(label("روش توقف", 16));
+        timeCard.addView(startTime);
+
+        // کارت روش توقف
+        LinearLayout modeCard =
+                createCard(root, "۲. روش توقف");
 
         modeSpinner = new Spinner(this);
+
         String[] modes = {
                 "توقف پس از تعداد مشخص کلیک",
                 "توقف پس از مدت زمان مشخص"
         };
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(
-                this, android.R.layout.simple_spinner_item, modes);
+
+        ArrayAdapter<String> adapter =
+                new ArrayAdapter<>(
+                        this,
+                        android.R.layout.simple_spinner_item,
+                        modes);
+
         adapter.setDropDownViewResource(
                 android.R.layout.simple_spinner_dropdown_item);
+
         modeSpinner.setAdapter(adapter);
-        root.addView(modeSpinner);
+        modeCard.addView(modeSpinner);
 
-        root.addView(label("تعداد کلیک", 15));
+        modeCard.addView(label("تعداد کلیک", 14));
+
         count = numberField("تعداد", 30);
-        root.addView(count);
+        modeCard.addView(count);
 
-        root.addView(label("مدت زمان کلیک", 16));
-
+        // مدت اجرا
         durationContainer = new LinearLayout(this);
-        durationContainer.setOrientation(LinearLayout.VERTICAL);
-        durationContainer.setPadding(8, 6, 8, 8);
+        durationContainer.setOrientation(
+                LinearLayout.VERTICAL);
+        durationContainer.setPadding(
+                dp(8), dp(6), dp(8), dp(8));
 
-        TextView durationLabel = label(
-                "ساعت / دقیقه / ثانیه / میلی‌ثانیه", 14);
-        durationContainer.addView(durationLabel);
+        durationContainer.addView(label(
+                "مدت اجرا: ساعت / دقیقه / ثانیه / میلی‌ثانیه",
+                13));
 
         LinearLayout durationFields = horizontal();
+
         durationHour = numberField("ساعت", 0);
         durationMinute = numberField("دقیقه", 0);
         durationSecond = numberField("ثانیه", 10);
@@ -163,71 +233,145 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
         addField(durationFields, durationMs);
 
         durationContainer.addView(durationFields);
-        root.addView(durationContainer);
+        modeCard.addView(durationContainer);
+
         setDurationColor(0);
 
         modeSpinner.setOnItemSelectedListener(
                 new AdapterView.OnItemSelectedListener() {
+
                     @Override
                     public void onItemSelected(
-                            AdapterView<?> parent, View view,
-                            int position, long id) {
+                            AdapterView<?> parent,
+                            View view,
+                            int position,
+                            long id) {
+
                         mode = position;
+
                         durationContainer.setVisibility(
-                                mode == 1 ? View.VISIBLE : View.GONE);
+                                mode == 1
+                                        ? View.VISIBLE
+                                        : View.GONE);
+
                         count.setVisibility(
-                                mode == 0 ? View.VISIBLE : View.GONE);
+                                mode == 0
+                                        ? View.VISIBLE
+                                        : View.GONE);
                     }
 
                     @Override
-                    public void onNothingSelected(AdapterView<?> parent) {
+                    public void onNothingSelected(
+                            AdapterView<?> parent) {
                     }
                 });
 
-        root.addView(label("فاصله بین کلیک‌ها (میلی‌ثانیه)", 15));
+        // کارت سرعت
+        LinearLayout speedCard =
+                createCard(root, "۳. سرعت کلیک");
+
+        speedCard.addView(label(
+                "فاصله بین کلیک‌ها (میلی‌ثانیه)", 14));
+
         interval = numberField("مثلاً 50", 50);
-        root.addView(interval);
+        speedCard.addView(interval);
 
-        root.addView(label("مدت لمس (میلی‌ثانیه)", 15));
+        speedCard.addView(label(
+                "مدت لمس (میلی‌ثانیه)", 14));
+
         touchDuration = numberField("مدت لمس", 1);
-        root.addView(touchDuration);
+        speedCard.addView(touchDuration);
 
-        Button startButton = makeButton("تنظیم و شروع کلیک");
-        root.addView(startButton);
+        // دکمه‌های اجرا
+        LinearLayout actionCard =
+                createCard(root, "۴. اجرای کلیکر");
 
-        Button stopButton = makeButton("توقف کلیک");
-        root.addView(stopButton);
+        Button startButton =
+                makeButton("تنظیم و شروع کلیک");
+
+        actionCard.addView(startButton);
+
+        Button stopButton =
+                makeButton("توقف کلیک");
+
+        actionCard.addView(stopButton);
 
         Button accessibilityButton =
                 makeButton("فعال‌سازی دسترسی کلیکر");
-        root.addView(accessibilityButton);
+
+        actionCard.addView(accessibilityButton);
 
         statusText = label("وضعیت: آماده", 15);
-        root.addView(statusText);
+        statusText.setGravity(Gravity.CENTER);
+        actionCard.addView(statusText);
 
-        root.addView(label("کالیبراسیون سرعت کلیک", 19));
+        // کارت تست محل کلیک
+        LinearLayout testCard =
+                createCard(root, "۵. تست محل کلیک");
+
+        testCard.addView(label(
+                "نشانگر آبی را روی کادر زیر قرار بده؛ " +
+                "سپس دکمه تست را بزن.", 13));
+
+        FrameLayout testArea = new FrameLayout(this);
+        testArea.setBackground(
+                background(0xFFE5F1FF, 0xFF1685E8));
+
+        LinearLayout.LayoutParams testParams =
+                new LinearLayout.LayoutParams(
+                        -1, dp(125));
+
+        testParams.setMargins(0, dp(8), 0, dp(8));
+
+        testCard.addView(testArea, testParams);
+
+        TextView testText = label(
+                "محل موردنظر برای تست لمس", 14);
+        testText.setGravity(Gravity.CENTER);
+
+        testArea.addView(testText,
+                new FrameLayout.LayoutParams(
+                        -1, -1));
+
+        Button testButton =
+                makeButton("تست کلیک در محل نشانگر آبی");
+
+        testCard.addView(testButton);
+
+        // کالیبراسیون
+        LinearLayout calibrationCard =
+                createCard(root, "۶. کالیبراسیون سرعت");
+
+        calibrationCard.addView(label(
+                "سرعت درخواستی (کلیک در ثانیه)", 14));
 
         desiredCps = numberField("کلیک در ثانیه", 10);
-        root.addView(desiredCps);
+        calibrationCard.addView(desiredCps);
 
         Button calibrationButton =
                 makeButton("اجرای تست ۳۰ کلیک");
-        root.addView(calibrationButton);
+
+        calibrationCard.addView(calibrationButton);
 
         calibrationResult = label(
-                "نتیجه کالیبراسیون هنوز ثبت نشده است.", 14);
-        root.addView(calibrationResult);
+                "نتیجه کالیبراسیون هنوز ثبت نشده است.",
+                13);
+
+        calibrationCard.addView(calibrationResult);
 
         Button applyButton =
                 makeButton("اعمال فاصله پیشنهادی");
-        root.addView(applyButton);
 
+        calibrationCard.addView(applyButton);
+
+        // رویدادها
         startButton.setOnClickListener(v -> scheduleClick());
 
         stopButton.setOnClickListener(v -> {
             if (ClickService.instance != null) {
                 ClickService.instance.stopClick();
             }
+
             statusText.setText("وضعیت: توقف دستی");
             setDurationColor(3);
         });
@@ -238,11 +382,29 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
             startActivity(intent);
         });
 
-        calibrationButton.setOnClickListener(v -> runCalibration());
+        testButton.setOnClickListener(v -> {
+            if (ClickService.instance == null) {
+                Toast.makeText(this,
+                        "ابتدا دسترسی کلیکر را فعال کن.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            ClickService.instance.testClickCurrentPosition();
+
+            Toast.makeText(this,
+                    "فرمان تست به محل نشانگر ارسال شد.",
+                    Toast.LENGTH_SHORT).show();
+        });
+
+        calibrationButton.setOnClickListener(
+                v -> runCalibration());
 
         applyButton.setOnClickListener(v -> {
             if (suggestedInterval > 0) {
-                interval.setText(String.valueOf(suggestedInterval));
+                interval.setText(
+                        String.valueOf(suggestedInterval));
+
                 calibrationResult.append(
                         "\nفاصله پیشنهادی اعمال شد.");
             } else {
@@ -255,8 +417,6 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
         setContentView(scroll);
     }
 
-    private long suggestedInterval = -1;
-
     private void scheduleClick() {
         if (ClickService.instance == null) {
             Toast.makeText(this,
@@ -265,10 +425,10 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
             return;
         }
 
-        int h = value(hour, 0);
-        int m = value(minute, 0);
-        int s = value(second, 0);
-        int ms = value(millisecond, 0);
+        int h = value(hour, -1);
+        int m = value(minute, -1);
+        int s = value(second, -1);
+        int ms = value(millisecond, -1);
 
         int c = value(count, 1);
         int i = value(interval, 50);
@@ -287,6 +447,7 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
                 i < 1 || touch < 1 ||
                 (mode == 0 && c < 1) ||
                 (mode == 1 && duration <= 0)) {
+
             Toast.makeText(this,
                     "مقادیر واردشده معتبر نیستند.",
                     Toast.LENGTH_LONG).show();
@@ -299,8 +460,7 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
                 c,
                 duration,
                 i,
-                touch
-        );
+                touch);
 
         statusText.setText("وضعیت: زمان‌بندی شد");
         setDurationColor(0);
@@ -315,6 +475,7 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
         }
 
         int cps = value(desiredCps, 10);
+
         if (cps < 1 || cps > 100) {
             Toast.makeText(this,
                     "سرعت را بین ۱ تا ۱۰۰ وارد کن.",
@@ -322,9 +483,12 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
             return;
         }
 
-        int requestedInterval = Math.max(1, 1000 / cps);
+        int requestedInterval =
+                Math.max(1, 1000 / cps);
 
-        calibrationResult.setText("تست در حال اجراست...");
+        calibrationResult.setText(
+                "تست در حال اجراست...");
+
         suggestedInterval = -1;
 
         ClickService.instance.startCalibration(
@@ -333,7 +497,9 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
                 new ClickService.CalibrationListener() {
 
                     @Override
-                    public void onProgress(int completed, int total) {
+                    public void onProgress(
+                            int completed, int total) {
+
                         runOnUiThread(() ->
                                 calibrationResult.setText(
                                         "پیشرفت تست: " +
@@ -366,8 +532,7 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
                                     maxInterval,
                                     actualCps,
                                     startOffset,
-                                    suggested
-                            );
+                                    suggested);
 
                             calibrationResult.setText(result);
                         });
@@ -379,8 +544,7 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
                                 calibrationResult.setText(
                                         "تست ناموفق بود: " + message));
                     }
-                }
-        );
+                });
     }
 
     @Override
@@ -397,15 +561,20 @@ public class MainActivity extends Activity implements ClickService.RunStateListe
         if (ClickService.instance != null) {
             ClickService.instance.setRunStateListener(null);
         }
+
         super.onDestroy();
     }
 
     @Override
-    public void onRunStateChanged(int state, String message) {
+    public void onRunStateChanged(
+            int state, String message) {
+
         runOnUiThread(() -> {
-            statusText.setText("وضعیت: " + message);
+            if (statusText != null) {
+                statusText.setText("وضعیت: " + message);
+            }
+
             setDurationColor(state);
         });
     }
 }
-
