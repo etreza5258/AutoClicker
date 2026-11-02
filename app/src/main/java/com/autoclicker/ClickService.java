@@ -1,3 +1,4 @@
+
 package com.autoclicker;
 
 import android.accessibilityservice.AccessibilityService;
@@ -47,8 +48,7 @@ public class ClickService extends AccessibilityService {
         void onRunStateChanged(int state, String message);
     }
 
-    // وضعیت رنگ کادر مدت زمان:
-    // 0 = عادی
+    // 0 = انتظار
     // 1 = در حال کلیک
     // 2 = پایان خودکار
     // 3 = توقف دستی
@@ -66,6 +66,8 @@ public class ClickService extends AccessibilityService {
 
     private LinearLayout floatingPanel;
     private WindowManager.LayoutParams panelParams;
+
+    private GradientDrawable panelBackground;
 
     private TextView clockText;
     private TextView countdownText;
@@ -130,9 +132,43 @@ public class ClickService extends AccessibilityService {
         return runVisualState;
     }
 
+    private void updatePanelColor(int state) {
+
+        if (panelBackground == null) return;
+
+        int color;
+
+        switch (state) {
+
+            case 1:
+                color = Color.rgb(80, 190, 100);
+                break;
+
+            case 2:
+                color = Color.rgb(255, 170, 50);
+                break;
+
+            case 3:
+                color = Color.rgb(220, 70, 70);
+                break;
+
+            default:
+                color = Color.LTGRAY;
+                break;
+        }
+
+        panelBackground.setColor(color);
+
+        if (floatingPanel != null) {
+            floatingPanel.invalidate();
+        }
+    }
+
     private void notifyRunState(int state, String message) {
 
         runVisualState = state;
+
+        updatePanelColor(state);
 
         if (runStateListener != null) {
             runStateListener.onRunStateChanged(
@@ -257,14 +293,15 @@ public class ClickService extends AccessibilityService {
                 dp(12), dp(8), dp(12), dp(8)
         );
 
-        GradientDrawable background =
-                new GradientDrawable();
+        panelBackground = new GradientDrawable();
 
-        background.setColor(0xEE222222);
-        background.setCornerRadius(dp(12));
-        background.setStroke(dp(1), 0xFF777777);
+        panelBackground.setColor(Color.LTGRAY);
+        panelBackground.setCornerRadius(dp(12));
+        panelBackground.setStroke(dp(1), 0xFF777777);
 
-        floatingPanel.setBackground(background);
+        floatingPanel.setBackground(panelBackground);
+
+        updatePanelColor(runVisualState);
 
         clockText = new TextView(this);
         clockText.setTextColor(Color.WHITE);
