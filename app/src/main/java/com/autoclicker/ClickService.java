@@ -47,7 +47,12 @@ public class ClickService extends AccessibilityService {
         void onRunStateChanged(int state, String message);
     }
 
-    // 0 = عادی، 1 = در حال کلیک، 2 = پایان خودکار، 3 = توقف دستی
+    // وضعیت رنگ کادر مدت زمان:
+    // 0 = عادی
+    // 1 = در حال کلیک
+    // 2 = پایان خودکار
+    // 3 = توقف دستی
+
     private int runVisualState = 0;
     private RunStateListener runStateListener;
 
@@ -102,12 +107,15 @@ public class ClickService extends AccessibilityService {
 
     private double averageIntervalMs = 0;
 
+    private long[] calibrationIntervals = new long[0];
+
     private CalibrationListener calibrationListener;
 
     private Runnable clickTask;
     private Runnable clockUpdater;
 
     public void setRunStateListener(RunStateListener listener) {
+
         runStateListener = listener;
 
         if (listener != null) {
@@ -123,10 +131,14 @@ public class ClickService extends AccessibilityService {
     }
 
     private void notifyRunState(int state, String message) {
+
         runVisualState = state;
 
         if (runStateListener != null) {
-            runStateListener.onRunStateChanged(state, message);
+            runStateListener.onRunStateChanged(
+                    state,
+                    message
+            );
         }
     }
 
@@ -502,25 +514,48 @@ public class ClickService extends AccessibilityService {
     }
 
     public void scheduleClick(
-            int hour, int minute, int second,
-            int count, int interval, int posX, int posY) {
+            int hour,
+            int minute,
+            int second,
+            int count,
+            int interval,
+            int posX,
+            int posY) {
 
         clickX = posX;
         clickY = posY;
 
         scheduleClick(
-                hour, minute, second, 0,
-                false, count, 0, interval, 1
+                hour,
+                minute,
+                second,
+                0,
+                false,
+                count,
+                0,
+                interval,
+                1
         );
     }
 
     public void scheduleClick(
-            int hour, int minute, int second,
-            int millisecond, int count, int interval) {
+            int hour,
+            int minute,
+            int second,
+            int millisecond,
+            int count,
+            int interval) {
 
         scheduleClick(
-                hour, minute, second, millisecond,
-                false, count, 0, interval, 1
+                hour,
+                minute,
+                second,
+                millisecond,
+                false,
+                count,
+                0,
+                interval,
+                1
         );
     }
 
@@ -575,6 +610,7 @@ public class ClickService extends AccessibilityService {
         calibrationMode = false;
         calibrationListener = null;
         calibrationTotalClicks = 0;
+        calibrationIntervals = new long[0];
 
         scheduled = true;
         gestureInProgress = false;
@@ -596,11 +632,13 @@ public class ClickService extends AccessibilityService {
         stopClick();
 
         if (requestedInterval < 1 || testClicks < 2) {
+
             if (listener != null) {
                 listener.onFailed(
                         "تنظیمات کالیبراسیون معتبر نیست"
                 );
             }
+
             return;
         }
 
@@ -621,6 +659,8 @@ public class ClickService extends AccessibilityService {
         nextClickDeadlineUptime = startDeadlineUptime;
 
         resetMeasurements();
+
+        calibrationIntervals = new long[testClicks];
 
         scheduled = true;
         gestureInProgress = false;
@@ -685,8 +725,13 @@ public class ClickService extends AccessibilityService {
                         : "در حال کلیک";
 
                 if (!calibrationMode && !runStarted) {
+
                     runStarted = true;
-                    notifyRunState(1, "در حال کلیک");
+
+                    notifyRunState(
+                            1,
+                            "در حال کلیک"
+                    );
                 }
 
                 gestureInProgress = true;
@@ -697,7 +742,8 @@ public class ClickService extends AccessibilityService {
                 if (clicksStarted == 0) {
 
                     firstClickOffsetMs =
-                            clickStartUptime - startDeadlineUptime;
+                            clickStartUptime -
+                            startDeadlineUptime;
 
                 } else {
 
@@ -712,6 +758,13 @@ public class ClickService extends AccessibilityService {
                         maxIntervalMs = actualInterval;
                     }
 
+                    if (calibrationMode &&
+                            intervalSamples <= calibrationIntervals.length) {
+
+                        calibrationIntervals[intervalSamples - 1] =
+                                actualInterval;
+                    }
+
                     averageIntervalMs =
                             (double) totalIntervalMs /
                             intervalSamples;
@@ -720,7 +773,7 @@ public class ClickService extends AccessibilityService {
                 lastClickStartUptime = clickStartUptime;
                 clicksStarted++;
 
-                // مهلت کلیک بعدی بر مبنای زمان شروع فعلی
+                // مهلت کلیک بعدی بر اساس زمان شروع فعلی
                 nextClickDeadlineUptime += intervalMs;
 
                 Path path = new Path();
@@ -787,15 +840,17 @@ public class ClickService extends AccessibilityService {
                                         remainingCount <= 0) {
 
                                     finishClick(
-                                            "پایان تعداد کلیک", 2
+                                            "پایان تعداد کلیک",
+                                            2
                                     );
+
                                     return;
                                 }
 
                                 long currentUptime =
                                         SystemClock.uptimeMillis();
 
-                                // اگر مهلت از دست رفته باشد،
+                                // اگر زمان‌بندی عقب افتاده باشد،
                                 // کلیک بعدی در اولین فرصت اجرا می‌شود.
                                 if (nextClickDeadlineUptime <
                                         currentUptime) {
@@ -823,11 +878,17 @@ public class ClickService extends AccessibilityService {
                                 gestureInProgress = false;
 
                                 if (calibrationMode) {
+
                                     failCalibration(
                                             "لمس آزمایشی لغو شد"
                                     );
+
                                 } else {
-                                    finishClick("لمس لغو شد", 3);
+
+                                    finishClick(
+                                            "لمس لغو شد",
+                                            3
+                                    );
                                 }
                             }
                         },
@@ -839,12 +900,16 @@ public class ClickService extends AccessibilityService {
                     gestureInProgress = false;
 
                     if (calibrationMode) {
+
                         failCalibration(
                                 "فرمان لمس آزمایشی پذیرفته نشد"
                         );
+
                     } else {
+
                         finishClick(
-                                "فرمان لمس پذیرفته نشد", 3
+                                "فرمان لمس پذیرفته نشد",
+                                3
                         );
                     }
                 }
@@ -871,15 +936,10 @@ public class ClickService extends AccessibilityService {
 
         if (intervalSamples > 0) {
 
-            long[] samples = new long[intervalSamples];
-
-            // نمونه‌های فاصله را از میانگین و آخرین زمان‌ها
-            // در نسخه فعلی با آرایه جداگانه نگهداری می‌کنیم.
-            // برای محاسبه پیشنهاد، میانگین اندازه‌گیری‌شده
-            // به همراه حاشیه محافظه‌کارانه استفاده می‌شود.
-            for (int i = 0; i < intervalSamples; i++) {
-                samples[i] = Math.round(averageIntervalMs);
-            }
+            long[] samples = Arrays.copyOf(
+                    calibrationIntervals,
+                    intervalSamples
+            );
 
             Arrays.sort(samples);
 
@@ -957,6 +1017,7 @@ public class ClickService extends AccessibilityService {
         }
 
         displayStatus = message;
+
         restoreOverlayTouch();
 
         if (!calibrationMode) {
@@ -978,6 +1039,7 @@ public class ClickService extends AccessibilityService {
 
         targetTime = 0;
         endTime = 0;
+
         startDeadlineUptime = 0;
         nextClickDeadlineUptime = 0;
 
@@ -1000,7 +1062,9 @@ public class ClickService extends AccessibilityService {
 
             calibrationListener = null;
 
-            listener.onFailed("کالیبراسیون متوقف شد");
+            listener.onFailed(
+                    "کالیبراسیون متوقف شد"
+            );
         }
     }
 
