@@ -1,506 +1,386 @@
 package com.autoclicker;
 
 import android.app.Activity;
-import android.os.Bundle;
 import android.content.Intent;
-import android.provider.Settings;
 import android.graphics.Color;
-import android.graphics.drawable.GradientDrawable;
+import android.graphics.Typeface;
+import android.net.Uri;
+import android.os.Bundle;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
-import android.text.InputType;
-import android.widget.*;
+import android.view.ViewGroup;
+import android.view.accessibility.AccessibilityManager;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.Spinner;
+import android.widget.ArrayAdapter;
+import android.widget.TextView;
+import android.widget.Toast;
 
-import java.util.Locale;
+import java.util.List;
 
-public class MainActivity extends Activity
-        implements ClickService.RunStateListener {
+public class MainActivity extends Activity implements ClickService.RunStateListener {
 
-    private EditText hour, minute, second, millisecond;
-    private EditText interval, touchDuration;
-    private EditText loopSeconds, loopMs;
-    private EditText pauseSeconds, pauseMs;
-    private EditText loopCount, desiredCps;
+    private EditText startHour, startMinute, startSecond, startMillis;
+    private EditText loopSeconds, loopMillis;
+    private EditText pauseSeconds, pauseMillis;
+    private EditText loopCount, intervalMillis, touchMillis;
+    private Spinner lastLoopSpinner;
 
-    private TextView statusText, calibrationResult;
-    private long suggestedInterval = -1;
+    private TextView statusText, reportText;
+    private Button startButton, stopButton;
 
-    private int dp(float value) {
-        return (int) (value * getResources()
-                .getDisplayMetrics().density + 0.5f);
-    }
-
-    private EditText numberField(String hint, int value) {
-        EditText e = new EditText(this);
-        e.setSingleLine(true);
-        e.setInputType(InputType.TYPE_CLASS_NUMBER);
-        e.setHint(hint);
-        e.setText(String.valueOf(value));
-        e.setTextColor(Color.BLACK);
-        e.setEms(5);
-        e.setSelectAllOnFocus(true);
-        return e;
-    }
-
-    private LinearLayout horizontal() {
-        LinearLayout l = new LinearLayout(this);
-        l.setOrientation(LinearLayout.HORIZONTAL);
-        l.setGravity(Gravity.CENTER_VERTICAL);
-        l.setPadding(0, dp(3), 0, dp(3));
-        return l;
-    }
-
-    private void addField(LinearLayout parent, EditText field) {
-        LinearLayout.LayoutParams p =
-                new LinearLayout.LayoutParams(0, -2, 1);
-        p.setMargins(dp(3), 0, dp(3), 0);
-        parent.addView(field, p);
-    }
-
-    private TextView label(String text, int size) {
-        TextView t = new TextView(this);
-        t.setText(text);
-        t.setTextSize(size);
-        t.setTextColor(Color.BLACK);
-        t.setPadding(0, dp(7), 0, dp(4));
-        return t;
-    }
-
-    private Button makeButton(String text) {
-        Button b = new Button(this);
-        b.setText(text);
-        b.setAllCaps(false);
-        return b;
-    }
-
-    private int value(EditText e, int fallback) {
-        try {
-            return Integer.parseInt(e.getText().toString().trim());
-        } catch (Exception ex) {
-            return fallback;
-        }
-    }
-
-    private GradientDrawable background(int color, int strokeColor) {
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(color);
-        bg.setCornerRadius(dp(12));
-        bg.setStroke(dp(1), strokeColor);
-        return bg;
-    }
-
-    private LinearLayout createCard(
-            LinearLayout parent, String title) {
-
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(12), dp(8), dp(12), dp(10));
-        card.setBackground(background(Color.WHITE, 0xFFDDDDDD));
-
-        LinearLayout.LayoutParams params =
-                new LinearLayout.LayoutParams(-1, -2);
-
-        params.setMargins(0, dp(6), 0, dp(6));
-        parent.addView(card, params);
-
-        TextView heading = label(title, 17);
-        heading.setTypeface(null,
-                android.graphics.Typeface.BOLD);
-        card.addView(heading);
-
-        return card;
-    }
-
-    private void setStatusColor(int state) {
-        if (statusText == null) return;
-
-        int color;
-
-        if (state == 1) {
-            color = Color.rgb(20, 130, 50);
-        } else if (state == 2) {
-            color = Color.rgb(20, 90, 180);
-        } else if (state == 3) {
-            color = Color.rgb(190, 40, 40);
-        } else {
-            color = Color.DKGRAY;
-        }
-
-        statusText.setTextColor(color);
-    }
+    private int background = Color.rgb(245, 247, 250);
+    private int primary = Color.rgb(35, 105, 210);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(14), dp(10), dp(14), dp(20));
-        root.setBackgroundColor(0xFFF3F5F7);
-
+        root.setPadding(dp(16), dp(16), dp(16), dp(24));
+        root.setBackgroundColor(background);
         scroll.addView(root);
 
-        TextView title = label("AutoClicker - Loop Edition", 24);
+        TextView title = new TextView(this);
+        title.setText("اتوکلیکر لوپی");
+        title.setTextSize(25);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        title.setTextColor(Color.rgb(30, 40, 55));
         title.setGravity(Gravity.CENTER);
-        title.setTypeface(null,
-                android.graphics.Typeface.BOLD);
-        root.addView(title);
+        root.addView(title, matchWrap());
 
-        TextView subtitle = label(
-                "اجرای زمان‌بندی‌شده با گزارش هر لوپ", 13);
+        TextView subtitle = new TextView(this);
+        subtitle.setText("تنظیم زمان شروع، چرخه‌ها و رفتار چرخه آخر");
+        subtitle.setTextSize(13);
+        subtitle.setTextColor(Color.DKGRAY);
         subtitle.setGravity(Gravity.CENTER);
-        root.addView(subtitle);
+        subtitle.setPadding(0, dp(5), 0, dp(16));
+        root.addView(subtitle, matchWrap());
 
-        // زمان شروع
-        LinearLayout timeCard =
-                createCard(root, "۱. زمان شروع");
+        addSection(root, "زمان شروع بر اساس ساعت گوشی");
+        LinearLayout startRow = horizontal(root);
+        startHour = addField(startRow, "ساعت", "00");
+        startMinute = addField(startRow, "دقیقه", "00");
+        startSecond = addField(startRow, "ثانیه", "00");
+        startMillis = addField(startRow, "میلی‌ثانیه", "000");
 
-        timeCard.addView(label(
-                "ساعت / دقیقه / ثانیه / میلی‌ثانیه", 13));
+        addSection(root, "مدت اجرای هر چرخه");
+        LinearLayout loopRow = horizontal(root);
+        loopSeconds = addField(loopRow, "ثانیه", "5");
+        loopMillis = addField(loopRow, "میلی‌ثانیه", "0");
 
-        LinearLayout startTime = horizontal();
+        addSection(root, "مکث بین چرخه‌ها");
+        LinearLayout pauseRow = horizontal(root);
+        pauseSeconds = addField(pauseRow, "ثانیه", "1");
+        pauseMillis = addField(pauseRow, "میلی‌ثانیه", "0");
 
-        hour = numberField("ساعت", 12);
-        minute = numberField("دقیقه", 0);
-        second = numberField("ثانیه", 0);
-        millisecond = numberField("میلی‌ثانیه", 0);
+        addSection(root, "تعداد چرخه‌ها");
+        loopCount = addSingleField(root, "تعداد چرخه (صفر = نامحدود)", "10");
 
-        addField(startTime, hour);
-        addField(startTime, minute);
-        addField(startTime, second);
-        addField(startTime, millisecond);
+        addSection(root, "تنظیم کلیک");
+        LinearLayout clickRow = horizontal(root);
+        intervalMillis = addField(clickRow, "فاصله کلیک (ms)", "200");
+        touchMillis = addField(clickRow, "مدت لمس (ms)", "20");
 
-        timeCard.addView(startTime);
+        addSection(root, "رفتار چرخه آخر");
+        lastLoopSpinner = new Spinner(this);
+        String[] lastOptions = {
+                "اجرای عادی؛ مثل چرخه‌های دیگر",
+                "فقط یک کلیک در چرخه آخر"
+        };
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(
+                this,
+                android.R.layout.simple_spinner_item,
+                lastOptions
+        );
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        lastLoopSpinner.setAdapter(adapter);
+        root.addView(lastLoopSpinner, matchWrap());
 
-        // مدت لوپ
-        LinearLayout loopCard =
-                createCard(root, "۲. مدت اجرای هر لوپ");
+        TextView hint = new TextView(this);
+        hint.setText("این گزینه فقط وقتی تعداد چرخه‌ها محدود باشد اجرا می‌شود. برای اجرای نامحدود، چرخه آخری وجود ندارد.");
+        hint.setTextColor(Color.rgb(90, 95, 105));
+        hint.setTextSize(12);
+        hint.setPadding(dp(4), dp(7), dp(4), dp(8));
+        root.addView(hint, matchWrap());
 
-        loopCard.addView(label(
-                "ثانیه / میلی‌ثانیه", 13));
+        addSection(root, "کنترل برنامه");
 
-        LinearLayout loopRow = horizontal();
+        startButton = makeButton("شروع اجرای لوپی", primary);
+        root.addView(startButton, matchWrap());
 
-        loopSeconds = numberField("ثانیه", 10);
-        loopMs = numberField("میلی‌ثانیه", 0);
+        stopButton = makeButton("توقف دستی", Color.rgb(190, 55, 55));
+        root.addView(stopButton, matchWrap());
 
-        addField(loopRow, loopSeconds);
-        addField(loopRow, loopMs);
+        Button accessibilityButton = makeButton("فعال‌سازی سرویس دسترس‌پذیری", Color.rgb(75, 85, 100));
+        root.addView(accessibilityButton, matchWrap());
 
-        loopCard.addView(loopRow);
+        Button overlayButton = makeButton("مجوز نمایش روی برنامه‌های دیگر", Color.rgb(75, 85, 100));
+        root.addView(overlayButton, matchWrap());
 
-        // مکث
-        LinearLayout pauseCard =
-                createCard(root, "۳. مکث بین لوپ‌ها");
+        Button testButton = makeButton("تست کلیک در محل نشانگر آبی", Color.rgb(40, 135, 100));
+        root.addView(testButton, matchWrap());
 
-        pauseCard.addView(label(
-                "ثانیه / میلی‌ثانیه", 13));
+        Button calibrationButton = makeButton("کالیبراسیون ۳۰ کلیک", Color.rgb(105, 85, 170));
+        root.addView(calibrationButton, matchWrap());
 
-        LinearLayout pauseRow = horizontal();
+        statusText = new TextView(this);
+        statusText.setText("وضعیت: آماده");
+        statusText.setTextSize(15);
+        statusText.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        statusText.setTextColor(Color.rgb(30, 55, 85));
+        statusText.setPadding(dp(5), dp(16), dp(5), dp(8));
+        root.addView(statusText, matchWrap());
 
-        pauseSeconds = numberField("ثانیه", 1);
-        pauseMs = numberField("میلی‌ثانیه", 0);
+        addSection(root, "گزارش چرخه‌ها");
+        reportText = new TextView(this);
+        reportText.setText("هنوز گزارشی ثبت نشده است.");
+        reportText.setTextSize(12);
+        reportText.setTextColor(Color.rgb(45, 50, 60));
+        reportText.setPadding(dp(10), dp(10), dp(10), dp(10));
+        reportText.setBackgroundColor(Color.WHITE);
+        root.addView(reportText, matchWrap());
 
-        addField(pauseRow, pauseSeconds);
-        addField(pauseRow, pauseMs);
+        setContentView(scroll);
 
-        pauseCard.addView(pauseRow);
-
-        // تعداد لوپ
-        LinearLayout countCard =
-                createCard(root, "۴. تعداد تکرار");
-
-        countCard.addView(label(
-                "تعداد لوپ؛ صفر یعنی اجرای نامحدود", 13));
-
-        loopCount = numberField("تعداد لوپ", 5);
-        countCard.addView(loopCount);
-
-        // سرعت
-        LinearLayout speedCard =
-                createCard(root, "۵. سرعت کلیک");
-
-        speedCard.addView(label(
-                "فاصله بین کلیک‌ها (میلی‌ثانیه)", 14));
-
-        interval = numberField("فاصله کلیک", 50);
-        speedCard.addView(interval);
-
-        speedCard.addView(label(
-                "مدت لمس هر کلیک (میلی‌ثانیه)", 14));
-
-        touchDuration = numberField("مدت لمس", 1);
-        speedCard.addView(touchDuration);
-
-        // اجرا
-        LinearLayout actionCard =
-                createCard(root, "۶. اجرای کلیکر");
-
-        Button startButton =
-                makeButton("تنظیم و شروع کلیک");
-
-        actionCard.addView(startButton);
-
-        Button stopButton =
-                makeButton("توقف کلیک");
-
-        actionCard.addView(stopButton);
-
-        Button accessibilityButton =
-                makeButton("فعال‌سازی دسترسی کلیکر");
-
-        actionCard.addView(accessibilityButton);
-
-        statusText = label("وضعیت: آماده", 15);
-        statusText.setGravity(Gravity.CENTER);
-        actionCard.addView(statusText);
-
-        // تست محل کلیک
-        LinearLayout testCard =
-                createCard(root, "۷. تست محل کلیک");
-
-        testCard.addView(label(
-                "نشانگر آبی را روی محل موردنظر قرار بده.", 13));
-
-        Button testButton =
-                makeButton("تست کلیک در محل نشانگر آبی");
-
-        testCard.addView(testButton);
-
-        // کالیبراسیون
-        LinearLayout calibrationCard =
-                createCard(root, "۸. کالیبراسیون سرعت");
-
-        calibrationCard.addView(label(
-                "سرعت درخواستی (کلیک در ثانیه)", 14));
-
-        desiredCps = numberField("کلیک در ثانیه", 10);
-        calibrationCard.addView(desiredCps);
-
-        Button calibrationButton =
-                makeButton("اجرای تست ۳۰ کلیک");
-
-        calibrationCard.addView(calibrationButton);
-
-        calibrationResult = label(
-                "نتیجه کالیبراسیون هنوز ثبت نشده است.", 13);
-
-        calibrationCard.addView(calibrationResult);
-
-        Button applyButton =
-                makeButton("اعمال فاصله پیشنهادی");
-
-        calibrationCard.addView(applyButton);
-
-        // رویدادها
-        startButton.setOnClickListener(v -> scheduleClick());
+        startButton.setOnClickListener(v -> startRun());
 
         stopButton.setOnClickListener(v -> {
             if (ClickService.instance != null) {
-                ClickService.instance.stopClick();
+                ClickService.instance.stopRun("توقف دستی");
             }
         });
 
-        accessibilityButton.setOnClickListener(v -> {
-            Intent intent = new Intent(
-                    Settings.ACTION_ACCESSIBILITY_SETTINGS);
-            startActivity(intent);
+        accessibilityButton.setOnClickListener(v ->
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        );
+
+        overlayButton.setOnClickListener(v -> {
+            if (android.os.Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
+                Intent intent = new Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + getPackageName())
+                );
+                startActivity(intent);
+            } else {
+                Toast.makeText(this, "مجوز نمایش روی برنامه‌ها فعال است.", Toast.LENGTH_SHORT).show();
+            }
         });
 
         testButton.setOnClickListener(v -> {
-            if (ClickService.instance == null) {
-                Toast.makeText(this,
-                        "ابتدا دسترسی کلیکر را فعال کن.",
-                        Toast.LENGTH_LONG).show();
-                return;
-            }
-
-            ClickService.instance.testClickCurrentPosition();
-
-            Toast.makeText(this,
-                    "فرمان تست به محل نشانگر ارسال شد.",
-                    Toast.LENGTH_SHORT).show();
-        });
-
-        calibrationButton.setOnClickListener(
-                v -> runCalibration());
-
-        applyButton.setOnClickListener(v -> {
-            if (suggestedInterval > 0) {
-                interval.setText(String.valueOf(suggestedInterval));
-                calibrationResult.append(
-                        "\nفاصله پیشنهادی اعمال شد.");
+            if (ClickService.instance != null) {
+                ClickService.instance.testClickCurrentPosition();
             } else {
-                Toast.makeText(this,
-                        "ابتدا تست کالیبراسیون را اجرا کن.",
-                        Toast.LENGTH_SHORT).show();
+                toast("ابتدا سرویس دسترس‌پذیری را فعال کن.");
             }
         });
 
-        setContentView(scroll);
-    }
-
-    private void scheduleClick() {
-        if (ClickService.instance == null) {
-            Toast.makeText(this,
-                    "ابتدا سرویس دسترسی کلیکر را فعال کن.",
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        int h = value(hour, -1);
-        int m = value(minute, -1);
-        int s = value(second, -1);
-        int ms = value(millisecond, -1);
-
-        int loopSec = value(loopSeconds, -1);
-        int loopMilli = value(loopMs, -1);
-
-        int pauseSec = value(pauseSeconds, -1);
-        int pauseMilli = value(pauseMs, -1);
-
-        int loops = value(loopCount, -1);
-        int i = value(interval, -1);
-        int touch = value(touchDuration, -1);
-
-        long loopDuration =
-                loopSec * 1000L + loopMilli;
-
-        long pauseDuration =
-                pauseSec * 1000L + pauseMilli;
-
-        if (h < 0 || h > 23 ||
-                m < 0 || m > 59 ||
-                s < 0 || s > 59 ||
-                ms < 0 || ms > 999 ||
-                loopSec < 0 ||
-                loopMilli < 0 || loopMilli > 999 ||
-                loopDuration <= 0 ||
-                pauseSec < 0 ||
-                pauseMilli < 0 || pauseMilli > 999 ||
-                loops < 0 ||
-                i < 1 || touch < 1) {
-
-            Toast.makeText(this,
-                    "مقادیر واردشده معتبر نیستند.",
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        ClickService.instance.scheduleClick(
-                h, m, s, ms,
-                loopDuration,
-                pauseDuration,
-                loops,
-                i,
-                touch);
-
-        statusText.setText("وضعیت: زمان‌بندی شد");
-        setStatusColor(0);
-    }
-
-    private void runCalibration() {
-        if (ClickService.instance == null) {
-            Toast.makeText(this,
-                    "ابتدا سرویس دسترسی کلیکر را فعال کن.",
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        int cps = value(desiredCps, 10);
-
-        if (cps < 1 || cps > 100) {
-            Toast.makeText(this,
-                    "سرعت را بین ۱ تا ۱۰۰ وارد کن.",
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        int requestedInterval = Math.max(1, 1000 / cps);
-
-        calibrationResult.setText("تست در حال اجراست...");
-        suggestedInterval = -1;
-
-        ClickService.instance.startCalibration(
-                requestedInterval,
-                30,
-                new ClickService.CalibrationListener() {
-
-                    @Override
-                    public void onProgress(int completed, int total) {
-                        runOnUiThread(() ->
-                                calibrationResult.setText(
-                                        "پیشرفت تست: " +
-                                        completed + " از " + total));
-                    }
-
-                    @Override
-                    public void onComplete(
-                            long averageInterval,
-                            long maxInterval,
-                            long suggested,
-                            double actualCps,
-                            long startOffset,
-                            int completedClicks) {
-
-                        runOnUiThread(() -> {
-                            suggestedInterval = suggested;
-
-                            String result = String.format(
-                                    Locale.US,
-                                    "تست کامل شد\n" +
-                                    "تعداد کلیک: %d\n" +
-                                    "میانگین فاصله: %d ms\n" +
-                                    "بیشترین فاصله: %d ms\n" +
-                                    "سرعت واقعی: %.2f کلیک در ثانیه\n" +
-                                    "اختلاف شروع: %d ms\n" +
-                                    "فاصله پیشنهادی: %d ms",
-                                    completedClicks,
-                                    averageInterval,
-                                    maxInterval,
-                                    actualCps,
-                                    startOffset,
-                                    suggested);
-
-                            calibrationResult.setText(result);
-                        });
-                    }
-
-                    @Override
-                    public void onFailed(String message) {
-                        runOnUiThread(() ->
-                                calibrationResult.setText(
-                                        "تست ناموفق بود: " + message));
-                    }
-                });
+        calibrationButton.setOnClickListener(v -> {
+            if (ClickService.instance != null) {
+                long interval = number(intervalMillis, 200);
+                long touch = number(touchMillis, 20);
+                ClickService.instance.startCalibration(interval, touch);
+            } else {
+                toast("ابتدا سرویس دسترس‌پذیری را فعال کن.");
+            }
+        });
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-
         if (ClickService.instance != null) {
             ClickService.instance.setRunStateListener(this);
+            updateReports(ClickService.instance.getReports());
+            statusText.setText("وضعیت: " + ClickService.instance.getCurrentStatus());
         }
     }
 
-    @Override
-    protected void onDestroy() {
-        if (ClickService.instance != null) {
-            ClickService.instance.setRunStateListener(null);
+    private void startRun() {
+        if (ClickService.instance == null) {
+            toast("ابتدا سرویس دسترس‌پذیری را فعال کن.");
+            return;
         }
-        super.onDestroy();
+
+        int h = (int) number(startHour, 0);
+        int m = (int) number(startMinute, 0);
+        int s = (int) number(startSecond, 0);
+        int ms = (int) number(startMillis, 0);
+
+        long loopSec = number(loopSeconds, 5);
+        long loopMs = number(loopMillis, 0);
+        long pauseSec = number(pauseSeconds, 1);
+        long pauseMs = number(pauseMillis, 0);
+        long count = number(loopCount, 10);
+        long interval = number(intervalMillis, 200);
+        long touch = number(touchMillis, 20);
+
+        if (h < 0 || h > 23 || m < 0 || m > 59 ||
+                s < 0 || s > 59 || ms < 0 || ms > 999) {
+            toast("زمان شروع معتبر نیست.");
+            return;
+        }
+
+        if (loopSec < 0 || loopMs < 0 || loopMs > 999 ||
+                pauseSec < 0 || pauseMs < 0 || pauseMs > 999) {
+            toast("مقادیر مدت چرخه یا مکث معتبر نیست.");
+            return;
+        }
+
+        if ((loopSec * 1000L + loopMs) <= 0) {
+            toast("مدت چرخه باید بیشتر از صفر باشد.");
+            return;
+        }
+
+        if (interval < 1 || touch < 1) {
+            toast("فاصله کلیک و مدت لمس باید حداقل یک میلی‌ثانیه باشد.");
+            return;
+        }
+
+        boolean singleLast = lastLoopSpinner.getSelectedItemPosition() == 1;
+
+        ClickService.instance.setRunStateListener(this);
+        ClickService.instance.scheduleLoops(
+                h, m, s, ms,
+                loopSec, loopMs,
+                pauseSec, pauseMs,
+                count,
+                interval,
+                touch,
+                singleLast
+        );
+    }
+
+    private LinearLayout horizontal(LinearLayout parent) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(3), 0, dp(3));
+        parent.addView(row, matchWrap());
+        return row;
+    }
+
+    private EditText addField(LinearLayout row, String label, String value) {
+        LinearLayout column = new LinearLayout(this);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setPadding(dp(3), dp(2), dp(3), dp(2));
+
+        TextView text = new TextView(this);
+        text.setText(label);
+        text.setTextSize(11);
+        text.setTextColor(Color.DKGRAY);
+        text.setGravity(Gravity.CENTER);
+        column.addView(text, matchWrap());
+
+        EditText edit = new EditText(this);
+        edit.setSingleLine(true);
+        edit.setText(value);
+        edit.setTextSize(15);
+        edit.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        edit.setGravity(Gravity.CENTER);
+        edit.setSelectAllOnFocus(true);
+        edit.setPadding(dp(3), dp(5), dp(3), dp(5));
+        column.addView(edit, matchWrap());
+
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+        row.addView(column, params);
+        return edit;
+    }
+
+    private EditText addSingleField(LinearLayout parent, String label, String value) {
+        LinearLayout row = horizontal(parent);
+        return addField(row, label, value);
+    }
+
+    private void addSection(LinearLayout root, String text) {
+        TextView title = new TextView(this);
+        title.setText(text);
+        title.setTextSize(16);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        title.setTextColor(Color.rgb(35, 65, 100));
+        title.setPadding(dp(2), dp(15), dp(2), dp(5));
+        root.addView(title, matchWrap());
+    }
+
+    private Button makeButton(String text, int color) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setTextColor(Color.WHITE);
+        button.setTextSize(14);
+        button.setAllCaps(false);
+        button.setBackgroundTintList(android.content.res.ColorStateList.valueOf(color));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(48)
+        );
+        params.setMargins(0, dp(4), 0, dp(4));
+        button.setLayoutParams(params);
+        return button;
+    }
+
+    private LinearLayout.LayoutParams matchWrap() {
+        return new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+    }
+
+    private long number(EditText edit, long fallback) {
+        try {
+            String value = edit.getText().toString().trim();
+            if (value.isEmpty()) return fallback;
+            return Long.parseLong(value);
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
+    private int dp(float value) {
+        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    private void toast(String message) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 
     @Override
-    public void onRunStateChanged(int state, String message) {
+    public void onRunStateChanged(String status) {
+        runOnUiThread(() -> statusText.setText("وضعیت: " + status));
+    }
+
+    @Override
+    public void onReportsChanged(List<String> reports) {
+        runOnUiThread(() -> updateReports(reports));
+    }
+
+    @Override
+    public void onCalibrationFinished(String result) {
         runOnUiThread(() -> {
-            if (statusText != null) {
-                statusText.setText("وضعیت: " + message);
-                setStatusColor(state);
-            }
+            statusText.setText("کالیبراسیون: " + result);
+            toast(result);
         });
+    }
+
+    private void updateReports(List<String> reports) {
+        if (reportText == null) return;
+
+        if (reports == null || reports.isEmpty()) {
+            reportText.setText("هنوز گزارشی ثبت نشده است.");
+            return;
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (int i = reports.size() - 1; i >= 0; i--) {
+            builder.append(reports.get(i)).append("\n\n");
+        }
+        reportText.setText(builder.toString());
     }
 }
