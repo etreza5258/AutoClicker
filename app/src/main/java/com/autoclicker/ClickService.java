@@ -27,12 +27,18 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.TimeZone;
 
 public class ClickService extends AccessibilityService {
 
@@ -43,6 +49,15 @@ public class ClickService extends AccessibilityService {
     }
 
     public static ClickService instance;
+
+    private static final int CLOCK_PHONE = 0;
+    private static final int CLOCK_TSETMC = 1;
+
+    private static final String TSETMC_TIME_URL =
+            "https://cdn.tsetmc.com/api/StaticData/GetTime";
+
+    private static final TimeZone TSETMC_TIME_ZONE =
+            TimeZone.getTimeZone("Asia/Tehran");
 
     private final Handler handler = new Handler(Looper.getMainLooper());
 
@@ -55,6 +70,8 @@ public class ClickService extends AccessibilityService {
     private WindowManager.LayoutParams panelParams;
 
     private TextView clockText;
+    private TextView tsetmcClockText;
+    private TextView clockDifferenceText;
     private TextView countdownText;
     private TextView panelStatusText;
     private TextView panelReportText;
@@ -109,27 +126,32 @@ public class ClickService extends AccessibilityService {
     private long targetStartElapsed;
     private long targetStartWall;
 
+    private boolean scheduleUsesTsetmcClock;
+
     private Runnable pendingClickRunnable;
     private Runnable clockRunnable;
     private Runnable pendingPauseRunnable;
     private Runnable pendingStartRunnable;
     private Runnable pendingTouchRunnable;
     private Runnable calibrationRunnable;
+    private Runnable tsetmcSyncRunnable;
 
     private final ArrayList<String> reports = new ArrayList<>();
 
     private final SimpleDateFormat timeFormat =
             new SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault());
 
-    private long calibrationIntervalMillis;
-    private long calibrationTouchMillis;
-    private int calibrationClicks;
+    private final SimpleDateFormat tsetmcTimeFormat =
+            new SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault());
 
-    private long calibrationStartElapsed;
-    private long calibrationLastClickElapsed;
-    private long calibrationTotalInterval;
-    private long calibrationMinInterval;
-    private long calibrationMaxInterval;
+    private long tsetmcServerAnchorMillis;
+    private long tsetmcAnchorElapsed;
+    private long tsetmcLastSyncElapsed;
+
+    private boolean tsetmcClockAvailable;
+    private boolean tsetmcSyncInProgress;
+
+    private String tsetmcClockError = "در انتظار دریافت ساعت سرور";
 
     private EditText pStartHour;
     private EditText pStartMinute;
@@ -147,6 +169,7 @@ public class ClickService extends AccessibilityService {
     private EditText pTouch;
 
     private Spinner pLastLoopSpinner;
+    private Spinner pClockBasisSpinner;
 
     private int markerOriginalFlags;
     private int panelOriginalFlags;
@@ -161,9 +184,12 @@ public class ClickService extends AccessibilityService {
         instance = this;
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
 
+        tsetmcTimeFormat.setTimeZone(TSETMC_TIME_ZONE);
+
         createMarker();
         createFloatingPanel();
         startClockUpdater();
+        startTsetmcSync();
 
         notifyState("آماده");
     }
@@ -188,6 +214,11 @@ public class ClickService extends AccessibilityService {
         if (clockRunnable != null) {
             handler.removeCallbacks(clockRunnable);
             clockRunnable = null;
+        }
+
+        if (tsetmcSyncRunnable != null) {
+            handler.removeCallbacks(tsetmcSyncRunnable);
+            tsetmcSyncRunnable = null;
         }
 
         cancelPendingActions();
@@ -237,6 +268,289 @@ public class ClickService extends AccessibilityService {
     }
 
     // =========================================================
+    // ساعت TSETMC
+    // =========================================================
+
+    private void startTsetmcSync() {
+
+        syncTsetmcClock();
+
+        tsetmcSyncRunnable = new Runnable() {
+            @Override
+            public void run() {
+                syncTsetmcClock();
+                handler.postDelayed(this, 10000);
+            }
+        };
+
+        handler.postDelayed(tsetmcSyncRunnable, 10000);
+    }
+
+    private void syncTsetmcClock() {
+
+        if (tsetmcSyncInProgress) {
+            return;
+        }
+
+        tsetmcSyncInProgress = true;
+
+        new Thread(() -> {
+
+            long requestStart = SystemClock.elapsedRealtime();
+            HttpURLConnection connection = null;
+
+            try {
+
+                URL url = new URL(TSETMC_TIME_URL);
+
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("GET");
+                connection.setConnectTimeout(5000);
+                connection.setReadTimeout(5000);
+                connection.setUseCaches(false);
+                connection.setRequestProperty(
+                        "User-Agent",
+                        "Mozilla/5.0 Android AutoClicker"
+                );
+                connection.setRequestProperty(
+                        "Accept",
+                        "text/plain,*/*"
+                );
+
+                connection.connect();
+
+                int responseCode = connection.getResponseCode();
+
+                if (responseCode != HttpURLConnection.HTTP_OK) {
+                    throw new Exception(
+                            "خطای پاسخ سرور: " + responseCode
+                    );
+                }
+
+                InputStream input = connection.getInputStream();
+
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(input, "UTF-8")
+                );
+
+                StringBuilder response = new StringBuilder();
+                String line;
+
+                while ((line = reader.readLine()) != null) {
+                    response.append(line);
+                }
+
+                reader.close();
+                input.close();
+
+                long responseEnd = SystemClock.elapsedRealtime();
+
+                String rawTime = response.toString().trim();
+
+                long parsedServerTime = parseTsetmcTime(rawTime);
+
+                if (parsedServerTime <= 0) {
+                    throw new Exception(
+                            "فرمت ساعت دریافتی قابل تشخیص نیست: " + rawTime
+                    );
+                }
+
+                // زمان مرجع را در نقطه میانی رفت و برگشت شبکه ثبت می‌کنیم.
+                long midpointElapsed =
+                        requestStart +
+                                (responseEnd - requestStart) / 2;
+
+                handler.post(() -> {
+
+                    tsetmcServerAnchorMillis = parsedServerTime;
+                    tsetmcAnchorElapsed = midpointElapsed;
+                    tsetmcLastSyncElapsed = SystemClock.elapsedRealtime();
+
+                    tsetmcClockAvailable = true;
+                    tsetmcClockError = "";
+
+                    updateClockViews();
+                });
+
+            } catch (Exception e) {
+
+                String error = e.getMessage();
+
+                handler.post(() -> {
+                    if (!tsetmcClockAvailable) {
+                        tsetmcClockError =
+                                error == null
+                                        ? "دریافت ساعت ناموفق بود"
+                                        : error;
+                    }
+
+                    updateClockViews();
+                });
+
+            } finally {
+
+                if (connection != null) {
+                    connection.disconnect();
+                }
+
+                handler.post(() -> tsetmcSyncInProgress = false);
+            }
+
+        }).start();
+    }
+
+    private long parseTsetmcTime(String raw) {
+
+        if (raw == null) {
+            return -1;
+        }
+
+        String value = raw.trim();
+
+        // پاسخ ممکن است به صورت متن ساده یا رشته داخل کوتیشن باشد.
+        value = value.replace("\"", "").trim();
+
+        String[] patterns = new String[] {
+                "dd/MM/yyyy HH:mm:ss",
+                "d/M/yyyy H:mm:ss",
+                "yyyy/MM/dd HH:mm:ss",
+                "yyyy-MM-dd HH:mm:ss",
+                "dd-MM-yyyy HH:mm:ss"
+        };
+
+        for (String pattern : patterns) {
+
+            try {
+
+                SimpleDateFormat parser =
+                        new SimpleDateFormat(pattern, Locale.US);
+
+                parser.setLenient(false);
+                parser.setTimeZone(TSETMC_TIME_ZONE);
+
+                Date parsed = parser.parse(value);
+
+                if (parsed != null) {
+                    return parsed.getTime();
+                }
+
+            } catch (Exception ignored) {
+            }
+        }
+
+        return -1;
+    }
+
+    private long getEstimatedTsetmcTimeMillis() {
+
+        if (!tsetmcClockAvailable) {
+            return -1;
+        }
+
+        long elapsedNow = SystemClock.elapsedRealtime();
+
+        return tsetmcServerAnchorMillis +
+                (elapsedNow - tsetmcAnchorElapsed);
+    }
+
+    private String formatTsetmcTime(long millis) {
+
+        if (millis <= 0) {
+            return "--:--:--.---";
+        }
+
+        return tsetmcTimeFormat.format(new Date(millis));
+    }
+
+    private String formatDifference(long difference) {
+
+        String sign;
+
+        if (difference > 0) {
+            sign = "+";
+        } else if (difference < 0) {
+            sign = "-";
+        } else {
+            sign = "";
+        }
+
+        return sign + Math.abs(difference) + " ms";
+    }
+
+    private void updateClockViews() {
+
+        long phoneNow = System.currentTimeMillis();
+
+        if (clockText != null) {
+            clockText.setText(
+                    "گوشی: " + formatWall(phoneNow)
+            );
+        }
+
+        if (tsetmcClockText != null) {
+
+            if (tsetmcClockAvailable) {
+
+                tsetmcClockText.setText(
+                        "TSETMC: " +
+                                formatTsetmcTime(
+                                        getEstimatedTsetmcTimeMillis()
+                                )
+                );
+
+            } else {
+
+                tsetmcClockText.setText(
+                        "TSETMC: " + tsetmcClockError
+                );
+            }
+        }
+
+        if (clockDifferenceText != null) {
+
+            if (tsetmcClockAvailable) {
+
+                long difference =
+                        phoneNow - getEstimatedTsetmcTimeMillis();
+
+                clockDifferenceText.setText(
+                        "اختلاف گوشی − TSETMC: " +
+                                formatDifference(difference)
+                );
+
+                if (difference > 0) {
+                    clockDifferenceText.setTextColor(
+                            Color.rgb(255, 190, 100)
+                    );
+                } else if (difference < 0) {
+                    clockDifferenceText.setTextColor(
+                            Color.rgb(120, 210, 255)
+                    );
+                } else {
+                    clockDifferenceText.setTextColor(Color.WHITE);
+                }
+
+            } else {
+
+                clockDifferenceText.setText(
+                        "اختلاف: در انتظار همگام‌سازی"
+                );
+
+                clockDifferenceText.setTextColor(Color.LTGRAY);
+            }
+        }
+    }
+
+    private String formatTargetClock(long millis) {
+
+        if (scheduleUsesTsetmcClock) {
+            return formatTsetmcTime(millis);
+        }
+
+        return formatWall(millis);
+    }
+
+    // =========================================================
     // پاک کردن گزارش ها
     // =========================================================
 
@@ -258,6 +572,9 @@ public class ClickService extends AccessibilityService {
     // اجرای لوپی
     // =========================================================
 
+    // سازگاری با فراخوانی قبلی MainActivity:
+    // در صورت فراخوانی این متد، ساعت گوشی مبنا خواهد بود.
+
     public void scheduleLoops(
             int hour,
             int minute,
@@ -271,6 +588,41 @@ public class ClickService extends AccessibilityService {
             long intervalMillis,
             long touchMillis,
             boolean singleClickLastLoop
+    ) {
+
+        scheduleLoops(
+                hour,
+                minute,
+                second,
+                millisecond,
+                loopSeconds,
+                loopMillis,
+                pauseSeconds,
+                pauseMillis,
+                loopCount,
+                intervalMillis,
+                touchMillis,
+                singleClickLastLoop,
+                false
+        );
+    }
+
+    // متد جدید با انتخاب مبنای ساعت
+
+    public void scheduleLoops(
+            int hour,
+            int minute,
+            int second,
+            int millisecond,
+            long loopSeconds,
+            long loopMillis,
+            long pauseSeconds,
+            long pauseMillis,
+            long loopCount,
+            long intervalMillis,
+            long touchMillis,
+            boolean singleClickLastLoop,
+            boolean useTsetmcClock
     ) {
 
         if (Build.VERSION.SDK_INT < 24) {
@@ -294,10 +646,19 @@ public class ClickService extends AccessibilityService {
             return;
         }
 
+        if (useTsetmcClock && !tsetmcClockAvailable) {
+            showToast(
+                    "ساعت TSETMC هنوز دریافت نشده است. اتصال اینترنت را بررسی کن."
+            );
+            syncTsetmcClock();
+            return;
+        }
+
         long durationMillis;
         long pauseMillisTotal;
 
         try {
+
             durationMillis = Math.addExact(
                     Math.multiplyExact(loopSeconds, 1000L),
                     loopMillis
@@ -337,6 +698,8 @@ public class ClickService extends AccessibilityService {
         configuredLoopCount = loopCount;
         lastLoopSingleClick = singleClickLastLoop;
 
+        scheduleUsesTsetmcClock = useTsetmcClock;
+
         completedLoops = 0;
         currentLoopClicks = 0;
         currentLoopStartWall = 0;
@@ -344,22 +707,38 @@ public class ClickService extends AccessibilityService {
         reports.clear();
         notifyReports();
 
-        Calendar target = Calendar.getInstance();
+        Calendar target;
+
+        long nowClock;
+
+        if (useTsetmcClock) {
+
+            target = Calendar.getInstance(TSETMC_TIME_ZONE);
+            nowClock = getEstimatedTsetmcTimeMillis();
+
+            target.setTimeInMillis(nowClock);
+
+        } else {
+
+            target = Calendar.getInstance();
+            nowClock = System.currentTimeMillis();
+        }
 
         target.set(Calendar.HOUR_OF_DAY, hour);
         target.set(Calendar.MINUTE, minute);
         target.set(Calendar.SECOND, second);
         target.set(Calendar.MILLISECOND, millisecond);
 
-        long nowWall = System.currentTimeMillis();
-
-        if (target.getTimeInMillis() <= nowWall) {
+        if (target.getTimeInMillis() <= nowClock) {
             target.add(Calendar.DAY_OF_MONTH, 1);
         }
 
         targetStartWall = target.getTimeInMillis();
 
-        long delayMillis = targetStartWall - nowWall;
+        long delayMillis = Math.max(
+                0,
+                targetStartWall - nowClock
+        );
 
         targetStartElapsed =
                 SystemClock.elapsedRealtime() + delayMillis;
@@ -371,7 +750,15 @@ public class ClickService extends AccessibilityService {
         running = true;
         waitingForStart = true;
 
-        notifyState("در انتظار شروع در " + formatWall(targetStartWall));
+        String clockName =
+                useTsetmcClock ? "TSETMC" : "ساعت گوشی";
+
+        notifyState(
+                "در انتظار شروع بر اساس " +
+                        clockName +
+                        " در " +
+                        formatTargetClock(targetStartWall)
+        );
 
         pendingStartRunnable = () -> {
 
@@ -764,7 +1151,9 @@ public class ClickService extends AccessibilityService {
         final float targetY =
                 location[1] + markerView.getHeight() / 2f;
 
+        // مقدار Touch کاربر حفظ شده است.
         final long duration = Math.max(1, durationMillis);
+
         final int thisTouchGeneration = ++touchGeneration;
 
         touchInFlight = true;
@@ -855,7 +1244,9 @@ public class ClickService extends AccessibilityService {
             }
         };
 
-        handler.postDelayed(pendingTouchRunnable, 35);
+        // تأخیر ثابت ۳۵ میلی‌ثانیه‌ای حذف شد.
+        // ارسال لمس بلافاصله پس از آماده‌سازی انجام می‌شود.
+        pendingTouchRunnable.run();
 
         return true;
     }
@@ -1374,7 +1765,7 @@ public class ClickService extends AccessibilityService {
                 )
         );
 
-        // ردیف اول: ساعت و دکمه باز و بسته کردن
+        // ردیف اول: ساعت گوشی و دکمه باز و بسته کردن
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
@@ -1383,7 +1774,7 @@ public class ClickService extends AccessibilityService {
         clockText = new TextView(this);
 
         clockText.setTextColor(Color.WHITE);
-        clockText.setTextSize(18);
+        clockText.setTextSize(13);
         clockText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         clockText.setGravity(Gravity.CENTER_VERTICAL);
 
@@ -1414,7 +1805,43 @@ public class ClickService extends AccessibilityService {
                 )
         );
 
-        // ردیف دوم: شمارش معکوس، کاملاً جدا از دکمه‌ها
+        // ساعت TSETMC
+
+        tsetmcClockText = new TextView(this);
+        tsetmcClockText.setTextColor(
+                Color.rgb(150, 220, 170)
+        );
+        tsetmcClockText.setTextSize(12);
+        tsetmcClockText.setTypeface(
+                Typeface.MONOSPACE,
+                Typeface.BOLD
+        );
+        tsetmcClockText.setGravity(Gravity.CENTER_VERTICAL);
+
+        root.addView(
+                tsetmcClockText,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(25)
+                )
+        );
+
+        // اختلاف ساعت گوشی و TSETMC
+
+        clockDifferenceText = new TextView(this);
+        clockDifferenceText.setTextColor(Color.WHITE);
+        clockDifferenceText.setTextSize(11);
+        clockDifferenceText.setGravity(Gravity.CENTER_VERTICAL);
+
+        root.addView(
+                clockDifferenceText,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(24)
+                )
+        );
+
+        // شمارش معکوس
 
         countdownText = new TextView(this);
 
@@ -1432,7 +1859,7 @@ public class ClickService extends AccessibilityService {
                 )
         );
 
-        // ردیف سوم: وضعیت اجرای برنامه
+        // وضعیت اجرای برنامه
 
         panelStatusText = new TextView(this);
 
@@ -1449,7 +1876,7 @@ public class ClickService extends AccessibilityService {
                 )
         );
 
-        // ردیف چهارم: دکمه توقف و پاک کردن گزارش ها
+        // دکمه‌های توقف و پاک کردن گزارش‌ها
 
         controlButtonsRow = new LinearLayout(this);
         controlButtonsRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -1518,6 +1945,7 @@ public class ClickService extends AccessibilityService {
 
         panelReportText = new TextView(this);
 
+        // رنگ گزارش‌ها سفید باقی می‌ماند.
         panelReportText.setTextColor(Color.WHITE);
         panelReportText.setTextSize(10);
         panelReportText.setPadding(0, dp(7), 0, dp(5));
@@ -1571,6 +1999,8 @@ public class ClickService extends AccessibilityService {
         panelParams.y = dp(80);
 
         installPanelDrag(clockText);
+        installPanelDrag(tsetmcClockText);
+        installPanelDrag(clockDifferenceText);
         installPanelDrag(countdownText);
         installPanelDrag(panelStatusText);
 
@@ -1621,6 +2051,7 @@ public class ClickService extends AccessibilityService {
             panelAdded = false;
         }
 
+        updateClockViews();
         updatePanelStatus();
     }
 
@@ -1696,6 +2127,58 @@ public class ClickService extends AccessibilityService {
 
         parent.addView(heading);
 
+        // انتخاب دستی مبنای ساعت
+
+        TextView clockBasisLabel = new TextView(this);
+
+        clockBasisLabel.setText("مبنای زمان‌بندی شروع");
+        clockBasisLabel.setTextColor(Color.WHITE);
+        clockBasisLabel.setTextSize(12);
+        clockBasisLabel.setTypeface(
+                Typeface.DEFAULT,
+                Typeface.BOLD
+        );
+        clockBasisLabel.setPadding(0, dp(8), 0, dp(4));
+
+        parent.addView(clockBasisLabel);
+
+        pClockBasisSpinner = new Spinner(this);
+
+        ArrayAdapter<String> clockAdapter =
+                new ArrayAdapter<>(
+                        this,
+                        android.R.layout.simple_spinner_item,
+                        new String[] {
+                                "ساعت گوشی اندروید",
+                                "ساعت سرور TSETMC"
+                        }
+                );
+
+        clockAdapter.setDropDownViewResource(
+                android.R.layout.simple_spinner_dropdown_item
+        );
+
+        pClockBasisSpinner.setAdapter(clockAdapter);
+        pClockBasisSpinner.setSelection(CLOCK_PHONE);
+
+        parent.addView(
+                pClockBasisSpinner,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(48)
+                )
+        );
+
+        Button syncClockButton = smallButton("به‌روزرسانی ساعت TSETMC");
+        parent.addView(syncClockButton);
+
+        syncClockButton.setOnClickListener(v -> {
+            tsetmcClockError = "در حال دریافت ساعت...";
+            updateClockViews();
+            syncTsetmcClock();
+            showToast("درخواست دریافت ساعت TSETMC ارسال شد.");
+        });
+
         pStartHour = panelField(parent, "ساعت شروع", "00");
         pStartMinute = panelField(parent, "دقیقه شروع", "00");
         pStartSecond = panelField(parent, "ثانیه شروع", "00");
@@ -1710,8 +2193,6 @@ public class ClickService extends AccessibilityService {
         pLoopCount = panelField(parent, "تعداد چرخه؛ صفر = نامحدود", "10");
         pInterval = panelField(parent, "فاصله کلیک؛ ms", "200");
         pTouch = panelField(parent, "مدت لمس؛ ms", "20");
-
-        // تنظیم مستقل رفتار چرخه آخر
 
         TextView lastLoopLabel = new TextView(this);
 
@@ -1844,6 +2325,11 @@ public class ClickService extends AccessibilityService {
         boolean singleLast =
                 pLastLoopSpinner.getSelectedItemPosition() == 1;
 
+        boolean useTsetmc =
+                pClockBasisSpinner != null &&
+                        pClockBasisSpinner.getSelectedItemPosition()
+                                == CLOCK_TSETMC;
+
         if (h < 0 || h > 23 ||
                 m < 0 || m > 59 ||
                 s < 0 || s > 59 ||
@@ -1868,7 +2354,8 @@ public class ClickService extends AccessibilityService {
                 count,
                 interval,
                 touch,
-                singleLast
+                singleLast,
+                useTsetmc
         );
     }
 
@@ -1923,11 +2410,7 @@ public class ClickService extends AccessibilityService {
             @Override
             public void run() {
 
-                if (clockText != null) {
-                    clockText.setText(
-                            formatWall(System.currentTimeMillis())
-                    );
-                }
+                updateClockViews();
 
                 if (countdownText != null) {
 
