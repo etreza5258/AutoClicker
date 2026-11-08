@@ -909,7 +909,9 @@ public class ClickService extends AccessibilityService {
         loopDurationMillis = durationMillis;
         pauseDurationMillis = pauseMillisTotal;
         this.intervalMillis = intervalMillis;
-        touchDurationMillis = touchMillis;
+        // حالت حداکثر سرعت: مدت لمس روی حداقل معتبر اندروید (۱ms) قرار می‌گیرد.
+        // پارامتر touchMillis برای سازگاری امضای متد حفظ شده، اما در اجرای لوپی محدودکننده نیست.
+        touchDurationMillis = 1L;
 
         configuredLoopCount = loopCount;
         configuredLastLoopMode = lastLoopMode;
@@ -1525,8 +1527,8 @@ public class ClickService extends AccessibilityService {
             }
         };
 
-        // این مقدار فقط آماده‌سازی overlay است و به مدت لمس کاربر دست نمی‌زند.
-        handler.postDelayed(pendingTouchRunnable, 40);
+        // بدون مکث مصنوعی ۴۰ میلی‌ثانیه‌ای؛ ارسال در اولین نوبت صف اصلی.
+        handler.post(pendingTouchRunnable);
         return true;
     }
 
@@ -2501,22 +2503,23 @@ public class ClickService extends AccessibilityService {
 
         pClockBasisSpinner = new Spinner(this);
 
-        ArrayAdapter<String> clockAdapter =
-                new ArrayAdapter<>(
-                        this,
-                        android.R.layout.simple_spinner_item,
-                        new String[] {
-                                "ساعت گوشی اندروید",
-                                "ساعت سرور TSETMC"
-                        }
-                );
-
-        clockAdapter.setDropDownViewResource(
-                android.R.layout.simple_spinner_dropdown_item
+        ArrayAdapter<String> clockAdapter = whiteSpinnerAdapter(
+                new String[] {
+                        "ساعت گوشی اندروید",
+                        "ساعت سرور TSETMC"
+                }
         );
 
         pClockBasisSpinner.setAdapter(clockAdapter);
         pClockBasisSpinner.setSelection(CLOCK_PHONE);
+        pClockBasisSpinner.setBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(Color.WHITE)
+        );
+        if (Build.VERSION.SDK_INT >= 16) {
+            pClockBasisSpinner.setPopupBackgroundDrawable(
+                    roundBackground(Color.rgb(25, 34, 48), dp(8))
+            );
+        }
 
         parent.addView(
                 pClockBasisSpinner,
@@ -2548,8 +2551,8 @@ public class ClickService extends AccessibilityService {
         pPauseMillis = panelField(parent, "مکث؛ میلی‌ثانیه", "0");
 
         pLoopCount = panelField(parent, "تعداد چرخه؛ صفر = نامحدود", "10");
-        pInterval = panelField(parent, "فاصله کلیک؛ ms", "200");
-        pTouch = panelField(parent, "مدت لمس؛ ms", "20");
+        pInterval = panelField(parent, "فاصله کلیک؛ ms (حداقل برای سرعت بیشتر)", "1");
+        pTouch = panelField(parent, "مدت لمس؛ حالت حداکثر سرعت (ثابت ۱ ms)", "1");
 
         TextView lastLoopLabel = new TextView(this);
 
@@ -2563,23 +2566,24 @@ public class ClickService extends AccessibilityService {
 
         pLastLoopSpinner = new Spinner(this);
 
-        ArrayAdapter<String> adapter =
-                new ArrayAdapter<>(
-                        this,
-                        android.R.layout.simple_spinner_item,
-                        new String[]{
-                                "چرخه آخر: اجرای عادی تا پایان زمان",
-                                "چرخه آخر: فقط یک کلیک تا پایان زمان",
-                                "چرخه آخر: مجموع کلیک‌های چرخه‌های قبلی",
-                                "چرخه آخر: تعداد کلیک دلخواه"
-                        }
-                );
-
-        adapter.setDropDownViewResource(
-                android.R.layout.simple_spinner_dropdown_item
+        ArrayAdapter<String> adapter = whiteSpinnerAdapter(
+                new String[]{
+                        "چرخه آخر: اجرای عادی تا پایان زمان",
+                        "چرخه آخر: فقط یک کلیک تا پایان زمان",
+                        "چرخه آخر: مجموع کلیک‌های چرخه‌های قبلی",
+                        "چرخه آخر: تعداد کلیک دلخواه"
+                }
         );
 
         pLastLoopSpinner.setAdapter(adapter);
+        pLastLoopSpinner.setBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(Color.WHITE)
+        );
+        if (Build.VERSION.SDK_INT >= 16) {
+            pLastLoopSpinner.setPopupBackgroundDrawable(
+                    roundBackground(Color.rgb(25, 34, 48), dp(8))
+            );
+        }
 
         parent.addView(
                 pLastLoopSpinner,
@@ -2610,7 +2614,7 @@ public class ClickService extends AccessibilityService {
 
         calibrate.setOnClickListener(v -> {
 
-            long interval = readNumber(pInterval, 200);
+            long interval = readNumber(pInterval, 1);
             long touch = readNumber(pTouch, 20);
 
             startCalibration(interval, touch);
@@ -2620,6 +2624,36 @@ public class ClickService extends AccessibilityService {
         parent.addView(stopCalibrationButton);
 
         stopCalibrationButton.setOnClickListener(v -> stopCalibration());
+    }
+
+    private ArrayAdapter<String> whiteSpinnerAdapter(String[] values) {
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(
+                this,
+                android.R.layout.simple_spinner_item,
+                values
+        ) {
+            private TextView styleText(View view) {
+                TextView text = (TextView) view;
+                text.setTextColor(Color.WHITE);
+                text.setTextSize(12);
+                text.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                text.setPadding(dp(8), dp(4), dp(8), dp(4));
+                text.setBackgroundColor(Color.rgb(25, 34, 48));
+                return text;
+            }
+
+            @Override
+            public View getView(int position, View convertView, ViewGroup parent) {
+                return styleText(super.getView(position, convertView, parent));
+            }
+
+            @Override
+            public View getDropDownView(int position, View convertView, ViewGroup parent) {
+                return styleText(super.getDropDownView(position, convertView, parent));
+            }
+        };
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        return adapter;
     }
 
     private EditText panelField(
@@ -2684,7 +2718,7 @@ public class ClickService extends AccessibilityService {
         long pauseMs = readNumber(pPauseMillis, 0);
 
         long count = readNumber(pLoopCount, 10);
-        long interval = readNumber(pInterval, 200);
+        long interval = readNumber(pInterval, 1);
         long touch = readNumber(pTouch, 20);
 
         int lastLoopMode =
