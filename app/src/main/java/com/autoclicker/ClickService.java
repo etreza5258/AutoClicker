@@ -1,4 +1,3 @@
-
 package com.autoclicker;
 
 import android.accessibilityservice.AccessibilityService;
@@ -76,6 +75,11 @@ public class ClickService extends AccessibilityService {
 
     private TextView clockText;
     private TextView tsetmcClockText;
+
+    // کادر جداگانه برای نمایش کامل خطای TSETMC
+    private TextView tsetmcErrorText;
+    private ScrollView tsetmcErrorScroll;
+
     private TextView clockDifferenceText;
     private TextView countdownText;
     private TextView panelStatusText;
@@ -357,57 +361,70 @@ public class ClickService extends AccessibilityService {
                     connection.setReadTimeout(10000);
                     connection.setUseCaches(false);
                     connection.setInstanceFollowRedirects(true);
-                    // هدرهای نزدیک‌تر به درخواست مرورگر دسکتاپ؛ بعضی پاسخ‌های TSETMC
-                    // به درخواست‌های سادهٔ کلاینت‌های غیرمرورگری متفاوت است.
+
                     connection.setRequestProperty(
                             "User-Agent",
                             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
                     );
+
                     connection.setRequestProperty(
                             "Accept",
                             "text/plain,application/json,text/html,*/*"
                     );
+
                     connection.setRequestProperty(
                             "Accept-Language",
                             "fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7"
                     );
+
                     connection.setRequestProperty(
                             "Accept-Encoding",
                             "identity"
                     );
+
                     connection.setRequestProperty(
                             "Connection",
                             "close"
                     );
+
                     connection.setRequestProperty(
                             "Referer",
                             "https://www.tsetmc.com/"
                     );
+
                     connection.setRequestProperty(
                             "Origin",
                             "https://www.tsetmc.com"
                     );
+
                     connection.setRequestProperty(
                             "Cache-Control",
                             "no-cache"
                     );
+
                     connection.connect();
 
                     int responseCode = connection.getResponseCode();
-                    InputStream input = (responseCode >= 200 && responseCode < 300)
-                            ? connection.getInputStream()
-                            : connection.getErrorStream();
+
+                    InputStream input =
+                            (responseCode >= 200 && responseCode < 300)
+                                    ? connection.getInputStream()
+                                    : connection.getErrorStream();
 
                     StringBuilder response = new StringBuilder();
 
                     if (input != null) {
+
                         BufferedReader reader = new BufferedReader(
                                 new InputStreamReader(input, "UTF-8")
                         );
+
                         String line;
                         int totalChars = 0;
 
-                        while ((line = reader.readLine()) != null && totalChars < 8192) {
+                        while ((line = reader.readLine()) != null &&
+                                totalChars < 8192) {
+
                             response.append(line);
                             totalChars += line.length();
                         }
@@ -434,20 +451,23 @@ public class ClickService extends AccessibilityService {
                     }
 
                     long responseEnd = SystemClock.elapsedRealtime();
+
                     long midpointElapsed = requestStart +
                             (responseEnd - requestStart) / 2;
 
                     final long acceptedServerTime = parsedServerTime;
                     final long acceptedMidpoint = midpointElapsed;
-                    final String acceptedEndpoint = endpoint;
 
                     handler.post(() -> {
+
                         tsetmcServerAnchorMillis = acceptedServerTime;
                         tsetmcAnchorElapsed = acceptedMidpoint;
                         tsetmcLastSyncElapsed = SystemClock.elapsedRealtime();
+
                         tsetmcClockAvailable = true;
                         tsetmcClockError = "";
                         tsetmcSyncInProgress = false;
+
                         updateClockViews();
                     });
 
@@ -456,8 +476,11 @@ public class ClickService extends AccessibilityService {
                 } catch (Exception e) {
 
                     String message = e.getMessage();
+
                     lastError = endpoint + ": " +
-                            (message == null ? e.getClass().getSimpleName() : message);
+                            (message == null
+                                    ? e.getClass().getSimpleName()
+                                    : message);
 
                 } finally {
 
@@ -490,31 +513,34 @@ public class ClickService extends AccessibilityService {
                 .replace("\\/", "/")
                 .trim();
 
-        // ارقام فارسی و عربی پاسخ احتمالی را به ارقام لاتین تبدیل می‌کنیم.
         StringBuilder normalized = new StringBuilder(value.length());
+
         for (int i = 0; i < value.length(); i++) {
+
             char ch = value.charAt(i);
+
             if (ch >= '\u06F0' && ch <= '\u06F9') {
                 normalized.append((char) ('0' + (ch - '\u06F0')));
+
             } else if (ch >= '\u0660' && ch <= '\u0669') {
                 normalized.append((char) ('0' + (ch - '\u0660')));
+
             } else {
                 normalized.append(ch);
             }
         }
+
         value = normalized.toString().trim();
 
-        // اگر پاسخ با متن اضافه آمد، فقط بخش تاریخ و ساعت را استخراج می‌کنیم.
-        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(
-                "(\\d{1,4}[/-]\\d{1,2}[/-]\\d{1,4}\\s+\\d{1,2}:\\d{1,2}:\\d{1,2}(?:\\.\\d{1,3})?)"
-        ).matcher(value);
+        java.util.regex.Matcher matcher =
+                java.util.regex.Pattern.compile(
+                        "(\\d{1,4}[/-]\\d{1,2}[/-]\\d{1,4}\\s+\\d{1,2}:\\d{1,2}:\\d{1,2}(?:\\.\\d{1,3})?)"
+                ).matcher(value);
 
         if (matcher.find()) {
             value = matcher.group(1);
         }
 
-        // خروجی GetTime در نمونهٔ دریافتی به قالب ماه/روز/سال است؛
-        // بنابراین الگوهای MM/dd باید قبل از dd/MM امتحان شوند.
         String[] patterns = new String[] {
                 "MM/dd/yyyy HH:mm:ss.SSS",
                 "M/d/yyyy H:mm:ss.SSS",
@@ -534,15 +560,20 @@ public class ClickService extends AccessibilityService {
         for (String pattern : patterns) {
 
             try {
+
                 SimpleDateFormat parser =
                         new SimpleDateFormat(pattern, Locale.US);
+
                 parser.setLenient(false);
                 parser.setTimeZone(TSETMC_TIME_ZONE);
 
                 ParsePosition position = new ParsePosition(0);
+
                 Date parsed = parser.parse(value, position);
 
-                if (parsed != null && position.getIndex() == value.length()) {
+                if (parsed != null &&
+                        position.getIndex() == value.length()) {
+
                     return parsed.getTime();
                 }
 
@@ -589,6 +620,10 @@ public class ClickService extends AccessibilityService {
         return sign + Math.abs(difference) + " ms";
     }
 
+    // =========================================================
+    // نمایش ساعت‌ها و خطای کامل TSETMC
+    // =========================================================
+
     private void updateClockViews() {
 
         long phoneNow = System.currentTimeMillis();
@@ -612,9 +647,36 @@ public class ClickService extends AccessibilityService {
 
             } else {
 
+                // متن کوتاه ساعت جدا از متن کامل خطا نمایش داده می‌شود.
                 tsetmcClockText.setText(
-                        "TSETMC: " + tsetmcClockError
+                        "TSETMC: دریافت ساعت ناموفق"
                 );
+            }
+        }
+
+        // نمایش متن کامل خطا در کادر مستقل و قابل اسکرول
+        if (tsetmcErrorText != null) {
+
+            if (tsetmcClockAvailable) {
+
+                tsetmcErrorText.setText(
+                        "اتصال به ساعت TSETMC برقرار است."
+                );
+
+                tsetmcErrorText.setTextColor(
+                        Color.rgb(150, 220, 170)
+                );
+
+            } else {
+
+                String error = tsetmcClockError;
+
+                if (error == null || error.trim().isEmpty()) {
+                    error = "خطای نامشخص؛ هنوز پاسخی دریافت نشده است.";
+                }
+
+                tsetmcErrorText.setText(error);
+                tsetmcErrorText.setTextColor(Color.WHITE);
             }
         }
 
@@ -631,14 +693,19 @@ public class ClickService extends AccessibilityService {
                 );
 
                 if (difference > 0) {
+
                     clockDifferenceText.setTextColor(
                             Color.rgb(255, 190, 100)
                     );
+
                 } else if (difference < 0) {
+
                     clockDifferenceText.setTextColor(
                             Color.rgb(120, 210, 255)
                     );
+
                 } else {
+
                     clockDifferenceText.setTextColor(Color.WHITE);
                 }
 
@@ -684,9 +751,6 @@ public class ClickService extends AccessibilityService {
     // اجرای لوپی
     // =========================================================
 
-    // سازگاری با فراخوانی قبلی MainActivity:
-    // در صورت فراخوانی این متد، ساعت گوشی مبنا خواهد بود.
-
     public void scheduleLoops(
             int hour,
             int minute,
@@ -719,7 +783,6 @@ public class ClickService extends AccessibilityService {
         );
     }
 
-    // سازگاری با نسخه قبلی؛ گزینه بولی قدیمی به حالت تک‌کلیک یا عادی تبدیل می‌شود.
     public void scheduleLoops(
             int hour,
             int minute,
@@ -735,6 +798,7 @@ public class ClickService extends AccessibilityService {
             boolean singleClickLastLoop,
             boolean useTsetmcClock
     ) {
+
         scheduleLoops(
                 hour, minute, second, millisecond,
                 loopSeconds, loopMillis,
@@ -746,7 +810,6 @@ public class ClickService extends AccessibilityService {
         );
     }
 
-    // نسخه جدید با چهار حالت چرخه آخر و امکان تعیین تعداد کلیک.
     public void scheduleLoops(
             int hour,
             int minute,
@@ -790,9 +853,11 @@ public class ClickService extends AccessibilityService {
         }
 
         if (useTsetmcClock && !tsetmcClockAvailable) {
+
             showToast(
                     "ساعت TSETMC هنوز دریافت نشده است. اتصال اینترنت را بررسی کن."
             );
+
             syncTsetmcClock();
             return;
         }
@@ -813,6 +878,7 @@ public class ClickService extends AccessibilityService {
             );
 
         } catch (Exception e) {
+
             showToast("مدت زمان واردشده بیش از حد بزرگ است.");
             return;
         }
@@ -958,37 +1024,52 @@ public class ClickService extends AccessibilityService {
         currentLoopClickLimit = Long.MAX_VALUE;
 
         if (currentLoopIsConfiguredLast) {
+
             if (configuredLastLoopMode == LAST_LOOP_SINGLE) {
+
                 currentLoopHasClickLimit = true;
                 currentLoopClickLimit = 1;
-                notifyState("چرخه آخر؛ یک کلیک تا پایان زمان چرخه");
+
+                notifyState(
+                        "چرخه آخر؛ یک کلیک تا پایان زمان چرخه"
+                );
 
             } else if (configuredLastLoopMode == LAST_LOOP_PREVIOUS_TOTAL) {
+
                 currentLoopHasClickLimit = true;
                 currentLoopClickLimit = previousLoopsClickTotal;
+
                 notifyState(
                         "چرخه آخر؛ هدف کلیک برابر مجموع چرخه‌های قبلی: " +
                                 currentLoopClickLimit
                 );
 
             } else if (configuredLastLoopMode == LAST_LOOP_CUSTOM) {
+
                 currentLoopHasClickLimit = true;
                 currentLoopClickLimit = configuredCustomLastLoopClicks;
+
                 notifyState(
                         "چرخه آخر؛ تعداد کلیک دلخواه: " +
                                 currentLoopClickLimit
                 );
 
             } else {
-                notifyState("چرخه آخر؛ اجرای عادی تا پایان زمان");
+
+                notifyState(
+                        "چرخه آخر؛ اجرای عادی تا پایان زمان"
+                );
             }
 
         } else {
-            notifyState("شروع چرخه " + (completedLoops + 1));
+
+            notifyState(
+                    "شروع چرخه " + (completedLoops + 1)
+            );
         }
 
-        // زمان، محدودیت قطعی چرخه است؛ مستقل از تعداد کلیک هدف.
         pendingLoopDeadlineRunnable = () -> {
+
             pendingLoopDeadlineRunnable = null;
 
             if (!running ||
@@ -1000,10 +1081,11 @@ public class ClickService extends AccessibilityService {
             currentLoopDeadlineReached = true;
             removePendingClick();
 
-            // اگر لمس در حال اجرا باشد، مدت لمس از ابتدا به زمان باقی‌مانده
-            // محدود شده و پایان چرخه بعد از callback همان لمس ثبت می‌شود.
             if (!gestureInProgress) {
-                finishCurrentLoop(runGeneration, "پایان زمان چرخه");
+                finishCurrentLoop(
+                        runGeneration,
+                        "پایان زمان چرخه"
+                );
             }
         };
 
@@ -1012,8 +1094,8 @@ public class ClickService extends AccessibilityService {
                 loopDurationMillis
         );
 
-        // اگر تعداد هدف صفر باشد، کلیکی انجام نمی‌شود؛ اما زمان چرخه کامل می‌شود.
         if (!currentLoopHasClickLimit || currentLoopClickLimit > 0) {
+
             scheduleNextClick(
                     runGeneration,
                     currentLoopStartElapsed
@@ -1042,7 +1124,12 @@ public class ClickService extends AccessibilityService {
         long now = SystemClock.elapsedRealtime();
 
         if (now >= currentLoopDeadlineElapsed) {
-            finishCurrentLoop(runGeneration, "پایان زمان چرخه");
+
+            finishCurrentLoop(
+                    runGeneration,
+                    "پایان زمان چرخه"
+            );
+
             return;
         }
 
@@ -1065,6 +1152,7 @@ public class ClickService extends AccessibilityService {
                         runGeneration,
                         "پایان زمان چرخه"
                 );
+
                 return;
             }
 
@@ -1089,20 +1177,32 @@ public class ClickService extends AccessibilityService {
         }
 
         long nowBeforeTouch = SystemClock.elapsedRealtime();
+
         long remainingBeforeTouch =
                 currentLoopDeadlineElapsed - nowBeforeTouch;
 
         if (remainingBeforeTouch <= 0) {
+
             currentLoopDeadlineReached = true;
-            finishCurrentLoop(runGeneration, "پایان زمان چرخه");
+
+            finishCurrentLoop(
+                    runGeneration,
+                    "پایان زمان چرخه"
+            );
+
             return;
         }
 
         gestureInProgress = true;
 
-        // لمس آخر هرگز عمداً از زمان باقی‌مانده چرخه طولانی‌تر نمی‌شود.
         long effectiveTouchDuration =
-                Math.max(1, Math.min(touchDurationMillis, remainingBeforeTouch));
+                Math.max(
+                        1,
+                        Math.min(
+                                touchDurationMillis,
+                                remainingBeforeTouch
+                        )
+                );
 
         boolean accepted = dispatchTouch(
                 effectiveTouchDuration,
@@ -1131,6 +1231,7 @@ public class ClickService extends AccessibilityService {
                                 runGeneration,
                                 "پایان زمان چرخه"
                         );
+
                         return;
                     }
 
@@ -1141,6 +1242,7 @@ public class ClickService extends AccessibilityService {
                                 "تعداد کلیک هدف تکمیل شد؛ " +
                                         "انتظار تا پایان زمان چرخه"
                         );
+
                         return;
                     }
 
@@ -1154,13 +1256,21 @@ public class ClickService extends AccessibilityService {
                         nextPlanned = now;
                     }
 
-                    scheduleNextClick(runGeneration, nextPlanned);
+                    scheduleNextClick(
+                            runGeneration,
+                            nextPlanned
+                    );
                 }
         );
 
         if (!accepted) {
+
             gestureInProgress = false;
-            finishCurrentLoop(runGeneration, "خطا در ارسال لمس");
+
+            finishCurrentLoop(
+                    runGeneration,
+                    "خطا در ارسال لمس"
+            );
         }
     }
 
@@ -1179,7 +1289,11 @@ public class ClickService extends AccessibilityService {
         removePendingClick();
 
         if (pendingLoopDeadlineRunnable != null) {
-            handler.removeCallbacks(pendingLoopDeadlineRunnable);
+
+            handler.removeCallbacks(
+                    pendingLoopDeadlineRunnable
+            );
+
             pendingLoopDeadlineRunnable = null;
         }
 
@@ -1206,8 +1320,11 @@ public class ClickService extends AccessibilityService {
         addReport(report);
 
         if (Long.MAX_VALUE - previousLoopsClickTotal < currentLoopClicks) {
+
             previousLoopsClickTotal = Long.MAX_VALUE;
+
         } else {
+
             previousLoopsClickTotal += currentLoopClicks;
         }
 
@@ -1234,7 +1351,9 @@ public class ClickService extends AccessibilityService {
         );
 
         if (pauseDurationMillis <= 0) {
+
             beginLoop(runGeneration);
+
         } else {
 
             pendingPauseRunnable = () -> {
@@ -1315,22 +1434,38 @@ public class ClickService extends AccessibilityService {
     private void cancelPendingActions() {
 
         if (pendingLoopDeadlineRunnable != null) {
-            handler.removeCallbacks(pendingLoopDeadlineRunnable);
+
+            handler.removeCallbacks(
+                    pendingLoopDeadlineRunnable
+            );
+
             pendingLoopDeadlineRunnable = null;
         }
 
         if (pendingStartRunnable != null) {
-            handler.removeCallbacks(pendingStartRunnable);
+
+            handler.removeCallbacks(
+                    pendingStartRunnable
+            );
+
             pendingStartRunnable = null;
         }
 
         if (pendingClickRunnable != null) {
-            handler.removeCallbacks(pendingClickRunnable);
+
+            handler.removeCallbacks(
+                    pendingClickRunnable
+            );
+
             pendingClickRunnable = null;
         }
 
         if (pendingPauseRunnable != null) {
-            handler.removeCallbacks(pendingPauseRunnable);
+
+            handler.removeCallbacks(
+                    pendingPauseRunnable
+            );
+
             pendingPauseRunnable = null;
         }
     }
@@ -1338,7 +1473,11 @@ public class ClickService extends AccessibilityService {
     private void removePendingClick() {
 
         if (pendingClickRunnable != null) {
-            handler.removeCallbacks(pendingClickRunnable);
+
+            handler.removeCallbacks(
+                    pendingClickRunnable
+            );
+
             pendingClickRunnable = null;
         }
     }
@@ -1361,21 +1500,29 @@ public class ClickService extends AccessibilityService {
                 !markerAdded ||
                 windowManager == null ||
                 touchInFlight) {
-            showToast("ارسال لمس ممکن نیست؛ نشانگر یا سرویس آماده نیست.");
+
+            showToast(
+                    "ارسال لمس ممکن نیست؛ نشانگر یا سرویس آماده نیست."
+            );
+
             return false;
         }
 
         AccessibilityServiceInfo activeInfo = getServiceInfo();
+
         if (activeInfo == null ||
                 (activeInfo.getCapabilities() &
                         AccessibilityServiceInfo.CAPABILITY_CAN_PERFORM_GESTURES) == 0) {
+
             showToast(
                     "سرویس اجازه ارسال لمس ندارد؛ android:canPerformGestures باید true باشد."
             );
+
             return false;
         }
 
         int[] location = new int[2];
+
         markerView.getLocationOnScreen(location);
 
         final float targetX =
@@ -1385,9 +1532,11 @@ public class ClickService extends AccessibilityService {
                 location[1] + markerView.getHeight() / 2f;
 
         final long duration = Math.max(1, durationMillis);
+
         final int thisTouchGeneration = ++touchGeneration;
 
         touchInFlight = true;
+
         disableOverlayTouchability();
 
         pendingTouchRunnable = () -> {
@@ -1401,10 +1550,15 @@ public class ClickService extends AccessibilityService {
             boolean accepted = false;
 
             try {
+
                 Path path = new Path();
+
                 path.moveTo(targetX, targetY);
-                // مسیر بسیار کوتاه، Stroke را برای GestureDescription معتبر می‌کند.
-                path.lineTo(targetX + 0.1f, targetY + 0.1f);
+
+                path.lineTo(
+                        targetX + 0.1f,
+                        targetY + 0.1f
+                );
 
                 GestureDescription.StrokeDescription stroke =
                         new GestureDescription.StrokeDescription(
@@ -1432,6 +1586,7 @@ public class ClickService extends AccessibilityService {
                                 }
 
                                 touchInFlight = false;
+
                                 restoreOverlayTouchability();
 
                                 if (result != null) {
@@ -1449,6 +1604,7 @@ public class ClickService extends AccessibilityService {
                                 }
 
                                 touchInFlight = false;
+
                                 restoreOverlayTouchability();
 
                                 if (result != null) {
@@ -1460,9 +1616,12 @@ public class ClickService extends AccessibilityService {
                 );
 
             } catch (Exception e) {
+
                 showToast(
                         "خطای ارسال لمس: " +
-                                (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage())
+                                (e.getMessage() == null
+                                        ? e.getClass().getSimpleName()
+                                        : e.getMessage())
                 );
             }
 
@@ -1470,6 +1629,7 @@ public class ClickService extends AccessibilityService {
                     thisTouchGeneration == touchGeneration) {
 
                 touchInFlight = false;
+
                 restoreOverlayTouchability();
 
                 if (result != null) {
@@ -1478,9 +1638,10 @@ public class ClickService extends AccessibilityService {
             }
         };
 
-        // به WindowManager فرصت می‌دهیم تغییر FLAG_NOT_TOUCHABLE را
-        // به InputDispatcher اعمال کند؛ سپس لمس به برنامه مقصد ارسال می‌شود.
-        handler.postDelayed(pendingTouchRunnable, 35);
+        handler.postDelayed(
+                pendingTouchRunnable,
+                35
+        );
 
         return true;
     }
@@ -1490,7 +1651,11 @@ public class ClickService extends AccessibilityService {
         touchGeneration++;
 
         if (pendingTouchRunnable != null) {
-            handler.removeCallbacks(pendingTouchRunnable);
+
+            handler.removeCallbacks(
+                    pendingTouchRunnable
+            );
+
             pendingTouchRunnable = null;
         }
 
@@ -1583,16 +1748,24 @@ public class ClickService extends AccessibilityService {
         if (running || waitingForStart ||
                 calibrationRunning || testClickRunning) {
 
-            showToast("ابتدا اجرای فعلی را متوقف کن.");
+            showToast(
+                    "ابتدا اجرای فعلی را متوقف کن."
+            );
+
             return;
         }
 
         if (!markerAdded || markerView == null) {
-            showToast("نشانگر روی صفحه موجود نیست.");
+
+            showToast(
+                    "نشانگر روی صفحه موجود نیست."
+            );
+
             return;
         }
 
         testClickRunning = true;
+
         notifyState("در حال اجرای کلیک آزمایشی");
 
         boolean accepted = dispatchTouch(
@@ -1602,19 +1775,39 @@ public class ClickService extends AccessibilityService {
                     testClickRunning = false;
 
                     if (completed) {
-                        showToast("کلیک آزمایشی با موفقیت انجام شد.");
-                        notifyState("کلیک آزمایشی موفق بود");
+
+                        showToast(
+                                "کلیک آزمایشی با موفقیت انجام شد."
+                        );
+
+                        notifyState(
+                                "کلیک آزمایشی موفق بود"
+                        );
+
                     } else {
-                        showToast("کلیک آزمایشی ناموفق بود.");
-                        notifyState("کلیک آزمایشی ناموفق بود");
+
+                        showToast(
+                                "کلیک آزمایشی ناموفق بود."
+                        );
+
+                        notifyState(
+                                "کلیک آزمایشی ناموفق بود"
+                        );
                     }
                 }
         );
 
         if (!accepted) {
+
             testClickRunning = false;
-            showToast("ارسال کلیک آزمایشی انجام نشد.");
-            notifyState("کلیک آزمایشی ارسال نشد");
+
+            showToast(
+                    "ارسال کلیک آزمایشی انجام نشد."
+            );
+
+            notifyState(
+                    "کلیک آزمایشی ارسال نشد"
+            );
         }
     }
 
@@ -1628,17 +1821,29 @@ public class ClickService extends AccessibilityService {
     ) {
 
         if (running || waitingForStart || testClickRunning) {
-            showToast("ابتدا اجرای فعلی را متوقف کن.");
+
+            showToast(
+                    "ابتدا اجرای فعلی را متوقف کن."
+            );
+
             return;
         }
 
         if (!markerAdded || markerView == null) {
-            showToast("نشانگر روی صفحه موجود نیست.");
+
+            showToast(
+                    "نشانگر روی صفحه موجود نیست."
+            );
+
             return;
         }
 
         if (intervalMillis < 1 || touchMillis < 1) {
-            showToast("فاصله و مدت لمس باید بیشتر از صفر باشند.");
+
+            showToast(
+                    "فاصله و مدت لمس باید بیشتر از صفر باشند."
+            );
+
             return;
         }
 
@@ -1663,12 +1868,14 @@ public class ClickService extends AccessibilityService {
         calibrationRunning = true;
 
         if (calibrationResultText != null) {
+
             calibrationResultText.setText(
                     "کالیبراسیون شروع شد: ۰ از ۳۰ کلیک"
             );
         }
 
         notifyState("شروع کالیبراسیون ۳۰ کلیک");
+
         performCalibrationClick();
     }
 
@@ -1692,6 +1899,7 @@ public class ClickService extends AccessibilityService {
                     }
 
                     if (!completed) {
+
                         calibrationRunning = false;
 
                         String error =
@@ -1704,6 +1912,7 @@ public class ClickService extends AccessibilityService {
                         }
 
                         notifyState("کالیبراسیون ناموفق");
+
                         return;
                     }
 
@@ -1747,7 +1956,8 @@ public class ClickService extends AccessibilityService {
                         return;
                     }
 
-                    calibrationRunnable = this::performCalibrationClick;
+                    calibrationRunnable =
+                            this::performCalibrationClick;
 
                     handler.postDelayed(
                             calibrationRunnable,
@@ -1782,7 +1992,11 @@ public class ClickService extends AccessibilityService {
         calibrationRunning = false;
 
         if (calibrationRunnable != null) {
-            handler.removeCallbacks(calibrationRunnable);
+
+            handler.removeCallbacks(
+                    calibrationRunnable
+            );
+
             calibrationRunnable = null;
         }
 
@@ -1819,7 +2033,10 @@ public class ClickService extends AccessibilityService {
         }
 
         notifyState("کالیبراسیون تمام شد");
-        showToast("کالیبراسیون ۳۰ کلیکی تکمیل شد.");
+
+        showToast(
+                "کالیبراسیون ۳۰ کلیکی تکمیل شد."
+        );
     }
 
     public void stopCalibration() {
@@ -1831,7 +2048,11 @@ public class ClickService extends AccessibilityService {
         calibrationRunning = false;
 
         if (calibrationRunnable != null) {
-            handler.removeCallbacks(calibrationRunnable);
+
+            handler.removeCallbacks(
+                    calibrationRunnable
+            );
+
             calibrationRunnable = null;
         }
 
@@ -1929,10 +2150,12 @@ public class ClickService extends AccessibilityService {
                                 markerY = markerParams.y + dp(27);
 
                                 try {
+
                                     windowManager.updateViewLayout(
                                             markerView,
                                             markerParams
                                     );
+
                                 } catch (Exception ignored) {
                                 }
 
@@ -1957,6 +2180,7 @@ public class ClickService extends AccessibilityService {
             markerAdded = true;
 
         } catch (Exception e) {
+
             markerAdded = false;
         }
     }
@@ -2002,6 +2226,7 @@ public class ClickService extends AccessibilityService {
         // ردیف اول: ساعت گوشی و دکمه باز و بسته کردن
 
         LinearLayout header = new LinearLayout(this);
+
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
 
@@ -2009,7 +2234,10 @@ public class ClickService extends AccessibilityService {
 
         clockText.setTextColor(Color.WHITE);
         clockText.setTextSize(13);
-        clockText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        clockText.setTypeface(
+                Typeface.MONOSPACE,
+                Typeface.BOLD
+        );
         clockText.setGravity(Gravity.CENTER_VERTICAL);
 
         header.addView(
@@ -2042,15 +2270,21 @@ public class ClickService extends AccessibilityService {
         // ساعت TSETMC
 
         tsetmcClockText = new TextView(this);
+
         tsetmcClockText.setTextColor(
                 Color.rgb(150, 220, 170)
         );
+
         tsetmcClockText.setTextSize(12);
+
         tsetmcClockText.setTypeface(
                 Typeface.MONOSPACE,
                 Typeface.BOLD
         );
-        tsetmcClockText.setGravity(Gravity.CENTER_VERTICAL);
+
+        tsetmcClockText.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
 
         root.addView(
                 tsetmcClockText,
@@ -2060,9 +2294,62 @@ public class ClickService extends AccessibilityService {
                 )
         );
 
+        // کادر اسکرول‌پذیر خطای TSETMC
+
+        tsetmcErrorScroll = new ScrollView(this);
+
+        tsetmcErrorScroll.setFillViewport(true);
+        tsetmcErrorScroll.setVerticalScrollBarEnabled(true);
+        tsetmcErrorScroll.setHorizontalScrollBarEnabled(false);
+
+        tsetmcErrorScroll.setBackground(
+                roundBackground(
+                        Color.rgb(38, 43, 55),
+                        dp(6)
+                )
+        );
+
+        tsetmcErrorText = new TextView(this);
+
+        tsetmcErrorText.setTextColor(Color.WHITE);
+        tsetmcErrorText.setTextSize(10);
+        tsetmcErrorText.setTypeface(Typeface.MONOSPACE);
+        tsetmcErrorText.setTextIsSelectable(true);
+        tsetmcErrorText.setGravity(
+                Gravity.TOP | Gravity.LEFT
+        );
+
+        tsetmcErrorText.setPadding(
+                dp(6),
+                dp(5),
+                dp(6),
+                dp(5)
+        );
+
+        tsetmcErrorText.setText(
+                "در انتظار دریافت اطلاعات ساعت TSETMC..."
+        );
+
+        tsetmcErrorScroll.addView(
+                tsetmcErrorText,
+                new ScrollView.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+        root.addView(
+                tsetmcErrorScroll,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(75)
+                )
+        );
+
         // اختلاف ساعت گوشی و TSETMC
 
         clockDifferenceText = new TextView(this);
+
         clockDifferenceText.setTextColor(Color.WHITE);
         clockDifferenceText.setTextSize(11);
         clockDifferenceText.setGravity(Gravity.CENTER_VERTICAL);
@@ -2079,11 +2366,27 @@ public class ClickService extends AccessibilityService {
 
         countdownText = new TextView(this);
 
-        countdownText.setTextColor(Color.rgb(100, 205, 255));
+        countdownText.setTextColor(
+                Color.rgb(100, 205, 255)
+        );
+
         countdownText.setTextSize(16);
-        countdownText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        countdownText.setGravity(Gravity.CENTER_VERTICAL);
-        countdownText.setPadding(0, dp(5), 0, dp(5));
+
+        countdownText.setTypeface(
+                Typeface.MONOSPACE,
+                Typeface.BOLD
+        );
+
+        countdownText.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
+
+        countdownText.setPadding(
+                0,
+                dp(5),
+                0,
+                dp(5)
+        );
 
         root.addView(
                 countdownText,
@@ -2099,8 +2402,17 @@ public class ClickService extends AccessibilityService {
 
         panelStatusText.setTextColor(Color.WHITE);
         panelStatusText.setTextSize(12);
-        panelStatusText.setGravity(Gravity.CENTER_VERTICAL);
-        panelStatusText.setPadding(0, dp(3), 0, dp(7));
+
+        panelStatusText.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
+
+        panelStatusText.setPadding(
+                0,
+                dp(3),
+                0,
+                dp(7)
+        );
 
         root.addView(
                 panelStatusText,
@@ -2113,8 +2425,14 @@ public class ClickService extends AccessibilityService {
         // دکمه‌های توقف و پاک کردن گزارش‌ها
 
         controlButtonsRow = new LinearLayout(this);
-        controlButtonsRow.setOrientation(LinearLayout.HORIZONTAL);
-        controlButtonsRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        controlButtonsRow.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        controlButtonsRow.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
 
         stopButton = smallButton("■ توقف");
 
@@ -2127,7 +2445,9 @@ public class ClickService extends AccessibilityService {
                 )
         );
 
-        clearReportsButton = smallButton("پاک‌کردن گزارش‌ها");
+        clearReportsButton = smallButton(
+                "پاک‌کردن گزارش‌ها"
+        );
 
         LinearLayout.LayoutParams clearParams =
                 new LinearLayout.LayoutParams(
@@ -2136,7 +2456,12 @@ public class ClickService extends AccessibilityService {
                         1
                 );
 
-        clearParams.setMargins(dp(5), 0, 0, 0);
+        clearParams.setMargins(
+                dp(5),
+                0,
+                0,
+                0
+        );
 
         controlButtonsRow.addView(
                 clearReportsButton,
@@ -2154,7 +2479,11 @@ public class ClickService extends AccessibilityService {
         // بخش تنظیمات بازشونده
 
         expandedContent = new LinearLayout(this);
-        expandedContent.setOrientation(LinearLayout.VERTICAL);
+
+        expandedContent.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
         expandedContent.setVisibility(View.GONE);
 
         root.addView(expandedContent);
@@ -2166,6 +2495,7 @@ public class ClickService extends AccessibilityService {
         );
 
         calibrationResultText.setTextSize(11);
+
         calibrationResultText.setPadding(
                 0,
                 dp(7),
@@ -2173,25 +2503,36 @@ public class ClickService extends AccessibilityService {
                 dp(7)
         );
 
-        calibrationResultText.setText("کالیبراسیون هنوز اجرا نشده است.");
+        calibrationResultText.setText(
+                "کالیبراسیون هنوز اجرا نشده است."
+        );
 
         expandedContent.addView(calibrationResultText);
 
         panelReportText = new TextView(this);
 
-        // رنگ گزارش‌ها سفید باقی می‌ماند.
         panelReportText.setTextColor(Color.WHITE);
         panelReportText.setTextSize(10);
-        panelReportText.setPadding(0, dp(7), 0, dp(5));
+
+        panelReportText.setPadding(
+                0,
+                dp(7),
+                0,
+                dp(5)
+        );
 
         expandedContent.addView(panelReportText);
 
         settingsScroll = new ScrollView(this);
+
         settingsScroll.setFillViewport(false);
         settingsScroll.setVerticalScrollBarEnabled(true);
 
         settingsContainer = new LinearLayout(this);
-        settingsContainer.setOrientation(LinearLayout.VERTICAL);
+
+        settingsContainer.setOrientation(
+                LinearLayout.VERTICAL
+        );
 
         settingsScroll.addView(
                 settingsContainer,
@@ -2222,7 +2563,8 @@ public class ClickService extends AccessibilityService {
                 PixelFormat.TRANSLUCENT
         );
 
-        panelParams.gravity = Gravity.TOP | Gravity.LEFT;
+        panelParams.gravity =
+                Gravity.TOP | Gravity.LEFT;
 
         int screenWidth =
                 getResources().getDisplayMetrics().widthPixels;
@@ -2243,7 +2585,9 @@ public class ClickService extends AccessibilityService {
             panelExpanded = !panelExpanded;
 
             expandedContent.setVisibility(
-                    panelExpanded ? View.VISIBLE : View.GONE
+                    panelExpanded
+                            ? View.VISIBLE
+                            : View.GONE
             );
 
             expandButton.setText(
@@ -2251,16 +2595,24 @@ public class ClickService extends AccessibilityService {
             );
 
             if (panelExpanded) {
+
                 panelParams.flags =
                         WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
+
             } else {
+
                 panelParams.flags =
                         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
                                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
             }
 
             try {
-                windowManager.updateViewLayout(panelView, panelParams);
+
+                windowManager.updateViewLayout(
+                        panelView,
+                        panelParams
+                );
+
             } catch (Exception ignored) {
             }
         });
@@ -2271,17 +2623,26 @@ public class ClickService extends AccessibilityService {
             stopCalibration();
             cancelPendingTouch();
 
-            showToast("تمام عملیات متوقف شدند.");
+            showToast(
+                    "تمام عملیات متوقف شدند."
+            );
         });
 
-        clearReportsButton.setOnClickListener(v -> clearReports());
+        clearReportsButton.setOnClickListener(
+                v -> clearReports()
+        );
 
         try {
 
-            windowManager.addView(panelView, panelParams);
+            windowManager.addView(
+                    panelView,
+                    panelParams
+            );
+
             panelAdded = true;
 
         } catch (Exception e) {
+
             panelAdded = false;
         }
 
@@ -2326,14 +2687,19 @@ public class ClickService extends AccessibilityService {
                                 float dy =
                                         event.getRawY() - downY;
 
-                                panelParams.x = startX + (int) dx;
-                                panelParams.y = startY + (int) dy;
+                                panelParams.x =
+                                        startX + (int) dx;
+
+                                panelParams.y =
+                                        startY + (int) dy;
 
                                 try {
+
                                     windowManager.updateViewLayout(
                                             panelView,
                                             panelParams
                                     );
+
                                 } catch (Exception ignored) {
                                 }
 
@@ -2356,8 +2722,18 @@ public class ClickService extends AccessibilityService {
         heading.setText("تنظیمات اجرای لوپی");
         heading.setTextColor(Color.WHITE);
         heading.setTextSize(13);
-        heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        heading.setPadding(0, dp(8), 0, dp(5));
+
+        heading.setTypeface(
+                Typeface.DEFAULT,
+                Typeface.BOLD
+        );
+
+        heading.setPadding(
+                0,
+                dp(8),
+                0,
+                dp(5)
+        );
 
         parent.addView(heading);
 
@@ -2365,14 +2741,24 @@ public class ClickService extends AccessibilityService {
 
         TextView clockBasisLabel = new TextView(this);
 
-        clockBasisLabel.setText("مبنای زمان‌بندی شروع");
+        clockBasisLabel.setText(
+                "مبنای زمان‌بندی شروع"
+        );
+
         clockBasisLabel.setTextColor(Color.WHITE);
         clockBasisLabel.setTextSize(12);
+
         clockBasisLabel.setTypeface(
                 Typeface.DEFAULT,
                 Typeface.BOLD
         );
-        clockBasisLabel.setPadding(0, dp(8), 0, dp(4));
+
+        clockBasisLabel.setPadding(
+                0,
+                dp(8),
+                0,
+                dp(4)
+        );
 
         parent.addView(clockBasisLabel);
 
@@ -2403,38 +2789,107 @@ public class ClickService extends AccessibilityService {
                 )
         );
 
-        Button syncClockButton = smallButton("به‌روزرسانی ساعت TSETMC");
+        Button syncClockButton = smallButton(
+                "به‌روزرسانی ساعت TSETMC"
+        );
+
         parent.addView(syncClockButton);
 
         syncClockButton.setOnClickListener(v -> {
+
             tsetmcClockError = "در حال دریافت ساعت...";
+
             updateClockViews();
             syncTsetmcClock();
-            showToast("درخواست دریافت ساعت TSETMC ارسال شد.");
+
+            showToast(
+                    "درخواست دریافت ساعت TSETMC ارسال شد."
+            );
         });
 
-        pStartHour = panelField(parent, "ساعت شروع", "00");
-        pStartMinute = panelField(parent, "دقیقه شروع", "00");
-        pStartSecond = panelField(parent, "ثانیه شروع", "00");
-        pStartMillis = panelField(parent, "میلی‌ثانیه شروع", "000");
+        pStartHour = panelField(
+                parent,
+                "ساعت شروع",
+                "00"
+        );
 
-        pLoopSeconds = panelField(parent, "مدت چرخه؛ ثانیه", "5");
-        pLoopMillis = panelField(parent, "مدت چرخه؛ میلی‌ثانیه", "0");
+        pStartMinute = panelField(
+                parent,
+                "دقیقه شروع",
+                "00"
+        );
 
-        pPauseSeconds = panelField(parent, "مکث؛ ثانیه", "1");
-        pPauseMillis = panelField(parent, "مکث؛ میلی‌ثانیه", "0");
+        pStartSecond = panelField(
+                parent,
+                "ثانیه شروع",
+                "00"
+        );
 
-        pLoopCount = panelField(parent, "تعداد چرخه؛ صفر = نامحدود", "10");
-        pInterval = panelField(parent, "فاصله کلیک؛ ms", "200");
-        pTouch = panelField(parent, "مدت لمس؛ ms", "20");
+        pStartMillis = panelField(
+                parent,
+                "میلی‌ثانیه شروع",
+                "000"
+        );
+
+        pLoopSeconds = panelField(
+                parent,
+                "مدت چرخه؛ ثانیه",
+                "5"
+        );
+
+        pLoopMillis = panelField(
+                parent,
+                "مدت چرخه؛ میلی‌ثانیه",
+                "0"
+        );
+
+        pPauseSeconds = panelField(
+                parent,
+                "مکث؛ ثانیه",
+                "1"
+        );
+
+        pPauseMillis = panelField(
+                parent,
+                "مکث؛ میلی‌ثانیه",
+                "0"
+        );
+
+        pLoopCount = panelField(
+                parent,
+                "تعداد چرخه؛ صفر = نامحدود",
+                "10"
+        );
+
+        pInterval = panelField(
+                parent,
+                "فاصله کلیک؛ ms",
+                "200"
+        );
+
+        pTouch = panelField(
+                parent,
+                "مدت لمس؛ ms",
+                "20"
+        );
 
         TextView lastLoopLabel = new TextView(this);
 
         lastLoopLabel.setText("رفتار چرخه آخر");
         lastLoopLabel.setTextColor(Color.WHITE);
         lastLoopLabel.setTextSize(12);
-        lastLoopLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        lastLoopLabel.setPadding(0, dp(10), 0, dp(4));
+
+        lastLoopLabel.setTypeface(
+                Typeface.DEFAULT,
+                Typeface.BOLD
+        );
+
+        lastLoopLabel.setPadding(
+                0,
+                dp(10),
+                0,
+                dp(4)
+        );
 
         parent.addView(lastLoopLabel);
 
@@ -2444,7 +2899,7 @@ public class ClickService extends AccessibilityService {
                 new ArrayAdapter<>(
                         this,
                         android.R.layout.simple_spinner_item,
-                        new String[]{
+                        new String[] {
                                 "چرخه آخر: اجرای عادی تا پایان زمان",
                                 "چرخه آخر: فقط یک کلیک تا پایان زمان",
                                 "چرخه آخر: مجموع کلیک‌های چرخه‌های قبلی",
@@ -2472,17 +2927,30 @@ public class ClickService extends AccessibilityService {
                 "100"
         );
 
-        Button start = smallButton("شروع با تنظیمات پنل");
+        Button start = smallButton(
+                "شروع با تنظیمات پنل"
+        );
+
         parent.addView(start);
 
-        start.setOnClickListener(v -> startFromFloatingPanel());
+        start.setOnClickListener(
+                v -> startFromFloatingPanel()
+        );
 
-        Button test = smallButton("تست کلیک نشانگر");
+        Button test = smallButton(
+                "تست کلیک نشانگر"
+        );
+
         parent.addView(test);
 
-        test.setOnClickListener(v -> testClickCurrentPosition());
+        test.setOnClickListener(
+                v -> testClickCurrentPosition()
+        );
 
-        Button calibrate = smallButton("شروع کالیبراسیون ۳۰ کلیکی");
+        Button calibrate = smallButton(
+                "شروع کالیبراسیون ۳۰ کلیکی"
+        );
+
         parent.addView(calibrate);
 
         calibrate.setOnClickListener(v -> {
@@ -2493,10 +2961,15 @@ public class ClickService extends AccessibilityService {
             startCalibration(interval, touch);
         });
 
-        Button stopCalibrationButton = smallButton("توقف کالیبراسیون");
+        Button stopCalibrationButton = smallButton(
+                "توقف کالیبراسیون"
+        );
+
         parent.addView(stopCalibrationButton);
 
-        stopCalibrationButton.setOnClickListener(v -> stopCalibration());
+        stopCalibrationButton.setOnClickListener(
+                v -> stopCalibration()
+        );
     }
 
     private EditText panelField(
@@ -2510,7 +2983,13 @@ public class ClickService extends AccessibilityService {
         title.setText(label);
         title.setTextColor(Color.LTGRAY);
         title.setTextSize(10);
-        title.setPadding(0, dp(4), 0, 0);
+
+        title.setPadding(
+                0,
+                dp(4),
+                0,
+                0
+        );
 
         parent.addView(title);
 
@@ -2526,10 +3005,17 @@ public class ClickService extends AccessibilityService {
                 android.text.InputType.TYPE_CLASS_NUMBER
         );
 
-        edit.setPadding(dp(5), 0, dp(5), 0);
+        edit.setPadding(
+                dp(5),
+                0,
+                dp(5),
+                0
+        );
 
         edit.setBackgroundTintList(
-                android.content.res.ColorStateList.valueOf(Color.GRAY)
+                android.content.res.ColorStateList.valueOf(
+                        Color.GRAY
+                )
         );
 
         parent.addView(
@@ -2592,14 +3078,17 @@ public class ClickService extends AccessibilityService {
                 lastLoopMode > LAST_LOOP_CUSTOM ||
                 (lastLoopMode == LAST_LOOP_CUSTOM &&
                         customLastLoopClicks < 1) ||
-                (count == 0 && lastLoopMode != LAST_LOOP_NORMAL) ||
+                (count == 0 &&
+                        lastLoopMode != LAST_LOOP_NORMAL) ||
                 loopSec * 1000L + loopMs <= 0) {
 
             showToast(
-                    count == 0 && lastLoopMode != LAST_LOOP_NORMAL
+                    count == 0 &&
+                            lastLoopMode != LAST_LOOP_NORMAL
                             ? "برای تنظیم چرخه آخر، تعداد کل چرخه‌ها باید مشخص باشد."
                             : "یکی از مقادیر تنظیمات معتبر نیست."
             );
+
             return;
         }
 
@@ -2625,7 +3114,12 @@ public class ClickService extends AccessibilityService {
         button.setTextColor(Color.WHITE);
         button.setAllCaps(false);
 
-        button.setPadding(dp(4), 0, dp(4), 0);
+        button.setPadding(
+                dp(4),
+                0,
+                dp(4),
+                0
+        );
 
         button.setBackgroundTintList(
                 android.content.res.ColorStateList.valueOf(
@@ -2708,6 +3202,7 @@ public class ClickService extends AccessibilityService {
                             );
 
                         } else {
+
                             countdownText.setText(
                                     "باقی‌مانده چرخه: " +
                                             formatDuration(
@@ -2719,10 +3214,12 @@ public class ClickService extends AccessibilityService {
                     } else if (calibrationRunning) {
 
                         countdownText.setText(
-                                "کالیبراسیون: " + calibrationClicks + "/30"
+                                "کالیبراسیون: " +
+                                        calibrationClicks + "/30"
                         );
 
                     } else {
+
                         countdownText.setText("آماده");
                     }
                 }
@@ -2743,18 +3240,30 @@ public class ClickService extends AccessibilityService {
         if (panelReportText != null) {
 
             if (reports.isEmpty()) {
-                panelReportText.setText("گزارشی ثبت نشده است.");
+
+                panelReportText.setText(
+                        "گزارشی ثبت نشده است."
+                );
+
             } else {
 
                 StringBuilder builder = new StringBuilder();
 
-                int start = Math.max(0, reports.size() - 3);
+                int start = Math.max(
+                        0,
+                        reports.size() - 3
+                );
 
                 for (int i = reports.size() - 1; i >= start; i--) {
-                    builder.append(reports.get(i)).append("\n\n");
+
+                    builder.append(
+                            reports.get(i)
+                    ).append("\n\n");
                 }
 
-                panelReportText.setText(builder.toString());
+                panelReportText.setText(
+                        builder.toString()
+                );
             }
         }
     }
@@ -2774,7 +3283,9 @@ public class ClickService extends AccessibilityService {
     private void notifyReports() {
 
         if (listener != null) {
-            listener.onReportsChanged(new ArrayList<>(reports));
+            listener.onReportsChanged(
+                    new ArrayList<>(reports)
+            );
         }
     }
 
@@ -2804,7 +3315,10 @@ public class ClickService extends AccessibilityService {
 
     private String formatDuration(long nanos) {
 
-        long millis = Math.max(0, nanos / 1_000_000L);
+        long millis = Math.max(
+                0,
+                nanos / 1_000_000L
+        );
 
         long hours = millis / 3_600_000L;
         millis %= 3_600_000L;
@@ -2825,11 +3339,15 @@ public class ClickService extends AccessibilityService {
         );
     }
 
-    private long readNumber(EditText edit, long fallback) {
+    private long readNumber(
+            EditText edit,
+            long fallback
+    ) {
 
         try {
 
-            String value = edit.getText().toString().trim();
+            String value =
+                    edit.getText().toString().trim();
 
             if (value.isEmpty()) {
                 return fallback;
@@ -2838,6 +3356,7 @@ public class ClickService extends AccessibilityService {
             return Long.parseLong(value);
 
         } catch (Exception e) {
+
             return fallback;
         }
     }
@@ -2847,11 +3366,16 @@ public class ClickService extends AccessibilityService {
             int radius
     ) {
 
-        GradientDrawable drawable = new GradientDrawable();
+        GradientDrawable drawable =
+                new GradientDrawable();
 
         drawable.setColor(color);
         drawable.setCornerRadius(radius);
-        drawable.setStroke(dp(1), Color.rgb(75, 90, 110));
+
+        drawable.setStroke(
+                dp(1),
+                Color.rgb(75, 90, 110)
+        );
 
         return drawable;
     }
