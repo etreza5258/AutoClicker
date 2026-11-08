@@ -353,17 +353,31 @@ public class ClickService extends AccessibilityService {
                     URL url = new URL(endpoint);
                     connection = (HttpURLConnection) url.openConnection();
                     connection.setRequestMethod("GET");
-                    connection.setConnectTimeout(6000);
-                    connection.setReadTimeout(6000);
+                    connection.setConnectTimeout(10000);
+                    connection.setReadTimeout(10000);
                     connection.setUseCaches(false);
                     connection.setInstanceFollowRedirects(true);
+                    // هدرهای نزدیک‌تر به درخواست مرورگر دسکتاپ؛ بعضی پاسخ‌های TSETMC
+                    // به درخواست‌های سادهٔ کلاینت‌های غیرمرورگری متفاوت است.
                     connection.setRequestProperty(
                             "User-Agent",
-                            "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36"
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
                     );
                     connection.setRequestProperty(
                             "Accept",
-                            "application/json, text/plain, */*"
+                            "text/plain,application/json,text/html,*/*"
+                    );
+                    connection.setRequestProperty(
+                            "Accept-Language",
+                            "fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7"
+                    );
+                    connection.setRequestProperty(
+                            "Accept-Encoding",
+                            "identity"
+                    );
+                    connection.setRequestProperty(
+                            "Connection",
+                            "close"
                     );
                     connection.setRequestProperty(
                             "Referer",
@@ -499,19 +513,22 @@ public class ClickService extends AccessibilityService {
             value = matcher.group(1);
         }
 
+        // خروجی GetTime در نمونهٔ دریافتی به قالب ماه/روز/سال است؛
+        // بنابراین الگوهای MM/dd باید قبل از dd/MM امتحان شوند.
         String[] patterns = new String[] {
-                "dd/MM/yyyy HH:mm:ss",
-                "d/M/yyyy H:mm:ss",
-                "dd/MM/yyyy HH:mm:ss.SSS",
-                "d/M/yyyy H:mm:ss.SSS",
-                "MM/dd/yyyy HH:mm:ss",
-                "M/d/yyyy H:mm:ss",
                 "MM/dd/yyyy HH:mm:ss.SSS",
                 "M/d/yyyy H:mm:ss.SSS",
+                "MM/dd/yyyy HH:mm:ss",
+                "M/d/yyyy H:mm:ss",
+                "dd/MM/yyyy HH:mm:ss.SSS",
+                "d/M/yyyy H:mm:ss.SSS",
+                "dd/MM/yyyy HH:mm:ss",
+                "d/M/yyyy H:mm:ss",
+                "yyyy/MM/dd HH:mm:ss.SSS",
                 "yyyy/MM/dd HH:mm:ss",
-                "yyyy-MM-dd HH:mm:ss",
+                "yyyy-MM-dd'T'HH:mm:ss.SSS",
                 "yyyy-MM-dd'T'HH:mm:ss",
-                "yyyy-MM-dd'T'HH:mm:ss.SSS"
+                "yyyy-MM-dd HH:mm:ss"
         };
 
         for (String pattern : patterns) {
