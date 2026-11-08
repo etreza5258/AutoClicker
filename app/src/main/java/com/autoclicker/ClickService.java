@@ -54,7 +54,6 @@ public class ClickService extends AccessibilityService {
     private static final int CLOCK_PHONE = 0;
     private static final int CLOCK_TSETMC = 1;
 
-    // فقط سرور اصلی TSETMC؛ آدرس cdn10 حذف شده است.
     private static final String TSETMC_TIME_URL =
             "https://cdn.tsetmc.com/api/StaticData/GetTime";
 
@@ -430,8 +429,6 @@ public class ClickService extends AccessibilityService {
                     tsetmcSyncInProgress = false;
                     tsetmcClockError = finalError;
 
-                    // اگر قبلاً ساعت معتبر دریافت شده باشد،
-                    // آخرین ساعت تخمینی همچنان قابل استفاده می‌ماند.
                     if (tsetmcServerAnchorMillis <= 0) {
                         tsetmcClockAvailable = false;
                     }
@@ -483,9 +480,6 @@ public class ClickService extends AccessibilityService {
             value = matcher.group(1);
         }
 
-        // پاسخ مشاهده‌شده سرور:
-        // 11/08/2026 21:42:41
-        // قالب قطعی MM/dd/yyyy است.
         String[] patterns = {
                 "MM/dd/yyyy HH:mm:ss.SSS",
                 "M/d/yyyy H:mm:ss.SSS",
@@ -1215,7 +1209,7 @@ public class ClickService extends AccessibilityService {
     }
 
     // =========================================================
-    // ارسال لمس واقعی
+    // ارسال لمس واقعی - نسخه سریع‌تر
     // =========================================================
 
     private interface GestureResult {
@@ -1263,93 +1257,88 @@ public class ClickService extends AccessibilityService {
         touchInFlight = true;
         disableOverlayTouchability();
 
-        pendingTouchRunnable = () -> {
-            pendingTouchRunnable = null;
+        boolean accepted = false;
 
-            if (thisTouchGeneration != touchGeneration) {
-                return;
-            }
+        try {
+            Path path = new Path();
+            path.moveTo(targetX, targetY);
+            path.lineTo(targetX + 0.1f, targetY + 0.1f);
 
-            boolean accepted = false;
+            GestureDescription.StrokeDescription stroke =
+                    new GestureDescription.StrokeDescription(
+                            path,
+                            0,
+                            duration
+                    );
 
-            try {
-                Path path = new Path();
-                path.moveTo(targetX, targetY);
-                path.lineTo(targetX + 0.1f, targetY + 0.1f);
+            GestureDescription gesture =
+                    new GestureDescription.Builder()
+                            .addStroke(stroke)
+                            .build();
 
-                GestureDescription.StrokeDescription stroke =
-                        new GestureDescription.StrokeDescription(
-                                path,
-                                0,
-                                duration
-                        );
-
-                GestureDescription gesture =
-                        new GestureDescription.Builder()
-                                .addStroke(stroke)
-                                .build();
-
-                accepted = dispatchGesture(
-                        gesture,
-                        new GestureResultCallback() {
-                            @Override
-                            public void onCompleted(
-                                    GestureDescription description
-                            ) {
-                                if (thisTouchGeneration != touchGeneration) {
-                                    return;
-                                }
-
-                                touchInFlight = false;
-                                restoreOverlayTouchability();
-
-                                if (result != null) {
-                                    result.onFinished(true);
-                                }
+            // حذف تأخیر ثابت ۳۵ میلی‌ثانیه:
+            // لمس بلافاصله ارسال می‌شود.
+            accepted = dispatchGesture(
+                    gesture,
+                    new GestureResultCallback() {
+                        @Override
+                        public void onCompleted(
+                                GestureDescription description
+                        ) {
+                            if (thisTouchGeneration != touchGeneration) {
+                                return;
                             }
 
-                            @Override
-                            public void onCancelled(
-                                    GestureDescription description
-                            ) {
-                                if (thisTouchGeneration != touchGeneration) {
-                                    return;
-                                }
+                            touchInFlight = false;
+                            restoreOverlayTouchability();
 
-                                touchInFlight = false;
-                                restoreOverlayTouchability();
-
-                                if (result != null) {
-                                    result.onFinished(false);
-                                }
+                            if (result != null) {
+                                result.onFinished(true);
                             }
-                        },
-                        handler
-                );
+                        }
 
-            } catch (Exception e) {
-                showToast(
-                        "خطای ارسال لمس: " +
-                                (e.getMessage() == null
-                                        ? e.getClass().getSimpleName()
-                                        : e.getMessage())
-                );
+                        @Override
+                        public void onCancelled(
+                                GestureDescription description
+                        ) {
+                            if (thisTouchGeneration != touchGeneration) {
+                                return;
+                            }
+
+                            touchInFlight = false;
+                            restoreOverlayTouchability();
+
+                            if (result != null) {
+                                result.onFinished(false);
+                            }
+                        }
+                    },
+                    handler
+            );
+
+        } catch (Exception e) {
+            showToast(
+                    "خطای ارسال لمس: " +
+                            (e.getMessage() == null
+                                    ? e.getClass().getSimpleName()
+                                    : e.getMessage())
+            );
+        }
+
+        if (!accepted &&
+                thisTouchGeneration == touchGeneration) {
+
+            touchInFlight = false;
+            restoreOverlayTouchability();
+
+            if (result != null) {
+                result.onFinished(false);
             }
 
-            if (!accepted &&
-                    thisTouchGeneration == touchGeneration) {
+            return false;
+        }
 
-                touchInFlight = false;
-                restoreOverlayTouchability();
-
-                if (result != null) {
-                    result.onFinished(false);
-                }
-            }
-        };
-
-        handler.postDelayed(pendingTouchRunnable, 35);
-        return true;
+        return accepted;
     }
 
     private void cancelPendingTouch() {
@@ -1816,7 +1805,6 @@ public class ClickService extends AccessibilityService {
                 )
         );
 
-        // متن خطا در کادر مستقل و قابل اسکرول
         tsetmcErrorScroll = new ScrollView(this);
         tsetmcErrorScroll.setFillViewport(true);
         tsetmcErrorScroll.setVerticalScrollBarEnabled(true);
@@ -2142,7 +2130,11 @@ public class ClickService extends AccessibilityService {
         pPauseMillis = panelField(parent, "مکث؛ میلی‌ثانیه", "0");
 
         pLoopCount = panelField(parent, "تعداد چرخه؛ صفر = نامحدود", "10");
-        pInterval = panelField(parent, "فاصله کلیک؛ ms", "200");
+
+        // مقدار پیش‌فرض فاصله کلیک از ۲۰۰ به ۵۰ میلی‌ثانیه تغییر کرد.
+        pInterval = panelField(parent, "فاصله کلیک؛ ms", "50");
+
+        // مدت لمس مستقل باقی مانده است.
         pTouch = panelField(parent, "مدت لمس؛ ms", "20");
 
         TextView lastLoopLabel = new TextView(this);
@@ -2198,7 +2190,7 @@ public class ClickService extends AccessibilityService {
         parent.addView(calibrate);
 
         calibrate.setOnClickListener(v -> {
-            long interval = readNumber(pInterval, 200);
+            long interval = readNumber(pInterval, 50);
             long touch = readNumber(pTouch, 20);
             startCalibration(interval, touch);
         });
@@ -2259,7 +2251,10 @@ public class ClickService extends AccessibilityService {
         long pauseSec = readNumber(pPauseSeconds, 1);
         long pauseMs = readNumber(pPauseMillis, 0);
         long count = readNumber(pLoopCount, 10);
-        long interval = readNumber(pInterval, 200);
+
+        // مقدار جایگزین فاصله کلیک نیز ۵۰ میلی‌ثانیه است.
+        long interval = readNumber(pInterval, 50);
+
         long touch = readNumber(pTouch, 20);
 
         int lastLoopMode =
