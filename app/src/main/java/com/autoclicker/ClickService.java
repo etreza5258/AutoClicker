@@ -195,6 +195,17 @@ public class ClickService extends AccessibilityService {
 
     private boolean touchInFlight;
 
+    // متغیرهای موردنیاز بخش کالیبراسیون
+    private int calibrationClicks;
+    private long calibrationIntervalMillis;
+    private long calibrationTouchMillis;
+    private long calibrationTotalInterval;
+    private long calibrationMinInterval;
+    private long calibrationMaxInterval;
+    private long calibrationLastClickElapsed;
+    private long calibrationStartElapsed;
+
+
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
