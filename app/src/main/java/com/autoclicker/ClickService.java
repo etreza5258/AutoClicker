@@ -1,4 +1,3 @@
-
 package com.autoclicker;
 
 import android.accessibilityservice.AccessibilityService;
@@ -98,6 +97,16 @@ public class ClickService extends AccessibilityService {
     private boolean running;
     private boolean waitingForStart;
     private boolean calibrationRunning;
+
+    private long calibrationIntervalMillis;
+    private long calibrationTouchMillis;
+    private long calibrationClicks;
+    private long calibrationTotalInterval;
+    private long calibrationMinInterval;
+    private long calibrationMaxInterval;
+    private long calibrationLastClickElapsed;
+    private long calibrationStartElapsed;
+
     private boolean gestureInProgress;
     private boolean testClickRunning;
 
@@ -110,10 +119,24 @@ public class ClickService extends AccessibilityService {
     private long touchDurationMillis;
 
     private long configuredLoopCount;
-    private boolean lastLoopSingleClick;
+
+    private static final int LAST_LOOP_NORMAL = 0;
+    private static final int LAST_LOOP_SINGLE = 1;
+    private static final int LAST_LOOP_PREVIOUS_TOTAL = 2;
+    private static final int LAST_LOOP_CUSTOM = 3;
+
+    private int configuredLastLoopMode = LAST_LOOP_NORMAL;
+    private long configuredCustomLastLoopClicks;
+    private long previousLoopsClickTotal;
 
     private long completedLoops;
     private long currentLoopClicks;
+    private long currentLoopClickLimit;
+
+    private boolean currentLoopHasClickLimit;
+    private boolean currentLoopIsConfiguredLast;
+    private boolean currentLoopDeadlineReached;
+    private boolean currentLoopFinished;
 
     private long currentLoopStartElapsed;
     private long currentLoopDeadlineElapsed;
@@ -121,14 +144,13 @@ public class ClickService extends AccessibilityService {
 
     private long nextClickNumber;
 
-    private boolean currentLoopIsLastSingle;
-
     private long targetStartElapsed;
     private long targetStartWall;
 
     private boolean scheduleUsesTsetmcClock;
 
     private Runnable pendingClickRunnable;
+    private Runnable pendingLoopDeadlineRunnable;
     private Runnable clockRunnable;
     private Runnable pendingPauseRunnable;
     private Runnable pendingStartRunnable;
@@ -170,6 +192,7 @@ public class ClickService extends AccessibilityService {
 
     private Spinner pLastLoopSpinner;
     private Spinner pClockBasisSpinner;
+    private EditText pLastLoopCustomCount;
 
     private int markerOriginalFlags;
     private int panelOriginalFlags;
@@ -607,8 +630,7 @@ public class ClickService extends AccessibilityService {
         );
     }
 
-    // متد جدید با انتخاب مبنای ساعت
-
+    // سازگاری با نسخه قبلی؛ گزینه بولی قدیمی به حالت تک‌کلیک یا عادی تبدیل می‌شود.
     public void scheduleLoops(
             int hour,
             int minute,
@@ -622,6 +644,34 @@ public class ClickService extends AccessibilityService {
             long intervalMillis,
             long touchMillis,
             boolean singleClickLastLoop,
+            boolean useTsetmcClock
+    ) {
+        scheduleLoops(
+                hour, minute, second, millisecond,
+                loopSeconds, loopMillis,
+                pauseSeconds, pauseMillis,
+                loopCount, intervalMillis, touchMillis,
+                singleClickLastLoop ? LAST_LOOP_SINGLE : LAST_LOOP_NORMAL,
+                0,
+                useTsetmcClock
+        );
+    }
+
+    // نسخه جدید با چهار حالت چرخه آخر و امکان تعیین تعداد کلیک.
+    public void scheduleLoops(
+            int hour,
+            int minute,
+            int second,
+            int millisecond,
+            long loopSeconds,
+            long loopMillis,
+            long pauseSeconds,
+            long pauseMillis,
+            long loopCount,
+            long intervalMillis,
+            long touchMillis,
+            int lastLoopMode,
+            long customLastLoopClicks,
             boolean useTsetmcClock
     ) {
 
@@ -640,7 +690,11 @@ public class ClickService extends AccessibilityService {
                 pauseMillis < 0 || pauseMillis > 999 ||
                 loopCount < 0 ||
                 intervalMillis < 1 ||
-                touchMillis < 1) {
+                touchMillis < 1 ||
+                lastLoopMode < LAST_LOOP_NORMAL ||
+                lastLoopMode > LAST_LOOP_CUSTOM ||
+                (lastLoopMode == LAST_LOOP_CUSTOM &&
+                        customLastLoopClicks < 1)) {
 
             showToast("تنظیمات واردشده معتبر نیست.");
             return;
@@ -696,13 +750,20 @@ public class ClickService extends AccessibilityService {
         touchDurationMillis = touchMillis;
 
         configuredLoopCount = loopCount;
-        lastLoopSingleClick = singleClickLastLoop;
+        configuredLastLoopMode = lastLoopMode;
+        configuredCustomLastLoopClicks = customLastLoopClicks;
+        previousLoopsClickTotal = 0;
 
         scheduleUsesTsetmcClock = useTsetmcClock;
 
         completedLoops = 0;
         currentLoopClicks = 0;
         currentLoopStartWall = 0;
+        currentLoopHasClickLimit = false;
+        currentLoopClickLimit = Long.MAX_VALUE;
+        currentLoopIsConfiguredLast = false;
+        currentLoopDeadlineReached = false;
+        currentLoopFinished = false;
 
         reports.clear();
         notifyReports();
@@ -791,6 +852,8 @@ public class ClickService extends AccessibilityService {
         currentLoopClicks = 0;
         nextClickNumber = 0;
         gestureInProgress = false;
+        currentLoopFinished = false;
+        currentLoopDeadlineReached = false;
 
         currentLoopStartElapsed = SystemClock.elapsedRealtime();
         currentLoopStartWall = System.currentTimeMillis();
@@ -798,17 +861,70 @@ public class ClickService extends AccessibilityService {
         currentLoopDeadlineElapsed =
                 currentLoopStartElapsed + loopDurationMillis;
 
-        currentLoopIsLastSingle =
-                lastLoopSingleClick &&
-                        configuredLoopCount > 0 &&
+        currentLoopIsConfiguredLast =
+                configuredLoopCount > 0 &&
                         completedLoops + 1 == configuredLoopCount;
 
-        if (currentLoopIsLastSingle) {
-            notifyState("چرخه آخر؛ فقط یک کلیک");
-            performSingleLastClick(runGeneration);
+        currentLoopHasClickLimit = false;
+        currentLoopClickLimit = Long.MAX_VALUE;
+
+        if (currentLoopIsConfiguredLast) {
+            if (configuredLastLoopMode == LAST_LOOP_SINGLE) {
+                currentLoopHasClickLimit = true;
+                currentLoopClickLimit = 1;
+                notifyState("چرخه آخر؛ یک کلیک تا پایان زمان چرخه");
+
+            } else if (configuredLastLoopMode == LAST_LOOP_PREVIOUS_TOTAL) {
+                currentLoopHasClickLimit = true;
+                currentLoopClickLimit = previousLoopsClickTotal;
+                notifyState(
+                        "چرخه آخر؛ هدف کلیک برابر مجموع چرخه‌های قبلی: " +
+                                currentLoopClickLimit
+                );
+
+            } else if (configuredLastLoopMode == LAST_LOOP_CUSTOM) {
+                currentLoopHasClickLimit = true;
+                currentLoopClickLimit = configuredCustomLastLoopClicks;
+                notifyState(
+                        "چرخه آخر؛ تعداد کلیک دلخواه: " +
+                                currentLoopClickLimit
+                );
+
+            } else {
+                notifyState("چرخه آخر؛ اجرای عادی تا پایان زمان");
+            }
+
         } else {
             notifyState("شروع چرخه " + (completedLoops + 1));
+        }
 
+        // زمان، محدودیت قطعی چرخه است؛ مستقل از تعداد کلیک هدف.
+        pendingLoopDeadlineRunnable = () -> {
+            pendingLoopDeadlineRunnable = null;
+
+            if (!running ||
+                    runGeneration != generation ||
+                    currentLoopFinished) {
+                return;
+            }
+
+            currentLoopDeadlineReached = true;
+            removePendingClick();
+
+            // اگر لمس در حال اجرا باشد، مدت لمس از ابتدا به زمان باقی‌مانده
+            // محدود شده و پایان چرخه بعد از callback همان لمس ثبت می‌شود.
+            if (!gestureInProgress) {
+                finishCurrentLoop(runGeneration, "پایان زمان چرخه");
+            }
+        };
+
+        handler.postDelayed(
+                pendingLoopDeadlineRunnable,
+                loopDurationMillis
+        );
+
+        // اگر تعداد هدف صفر باشد، کلیکی انجام نمی‌شود؛ اما زمان چرخه کامل می‌شود.
+        if (!currentLoopHasClickLimit || currentLoopClickLimit > 0) {
             scheduleNextClick(
                     runGeneration,
                     currentLoopStartElapsed
@@ -823,7 +939,14 @@ public class ClickService extends AccessibilityService {
             long plannedElapsed
     ) {
 
-        if (!running || runGeneration != generation) {
+        if (!running ||
+                runGeneration != generation ||
+                currentLoopFinished) {
+            return;
+        }
+
+        if (currentLoopHasClickLimit &&
+                currentLoopClicks >= currentLoopClickLimit) {
             return;
         }
 
@@ -840,7 +963,9 @@ public class ClickService extends AccessibilityService {
 
             pendingClickRunnable = null;
 
-            if (!running || runGeneration != generation) {
+            if (!running ||
+                    runGeneration != generation ||
+                    currentLoopFinished) {
                 return;
             }
 
@@ -864,21 +989,34 @@ public class ClickService extends AccessibilityService {
 
         if (!running ||
                 runGeneration != generation ||
-                gestureInProgress) {
+                gestureInProgress ||
+                currentLoopFinished) {
             return;
         }
 
-        if (SystemClock.elapsedRealtime() >=
-                currentLoopDeadlineElapsed) {
+        if (currentLoopHasClickLimit &&
+                currentLoopClicks >= currentLoopClickLimit) {
+            return;
+        }
 
+        long nowBeforeTouch = SystemClock.elapsedRealtime();
+        long remainingBeforeTouch =
+                currentLoopDeadlineElapsed - nowBeforeTouch;
+
+        if (remainingBeforeTouch <= 0) {
+            currentLoopDeadlineReached = true;
             finishCurrentLoop(runGeneration, "پایان زمان چرخه");
             return;
         }
 
         gestureInProgress = true;
 
+        // لمس آخر هرگز عمداً از زمان باقی‌مانده چرخه طولانی‌تر نمی‌شود.
+        long effectiveTouchDuration =
+                Math.max(1, Math.min(touchDurationMillis, remainingBeforeTouch));
+
         boolean accepted = dispatchTouch(
-                touchDurationMillis,
+                effectiveTouchDuration,
                 completed -> {
 
                     if (runGeneration != generation || !running) {
@@ -887,16 +1025,32 @@ public class ClickService extends AccessibilityService {
 
                     gestureInProgress = false;
 
+                    if (currentLoopFinished) {
+                        return;
+                    }
+
                     if (completed) {
                         currentLoopClicks++;
                     }
 
                     long now = SystemClock.elapsedRealtime();
 
-                    if (now >= currentLoopDeadlineElapsed) {
+                    if (currentLoopDeadlineReached ||
+                            now >= currentLoopDeadlineElapsed) {
+
                         finishCurrentLoop(
                                 runGeneration,
                                 "پایان زمان چرخه"
+                        );
+                        return;
+                    }
+
+                    if (currentLoopHasClickLimit &&
+                            currentLoopClicks >= currentLoopClickLimit) {
+
+                        notifyState(
+                                "تعداد کلیک هدف تکمیل شد؛ " +
+                                        "انتظار تا پایان زمان چرخه"
                         );
                         return;
                     }
@@ -921,61 +1075,24 @@ public class ClickService extends AccessibilityService {
         }
     }
 
-    private void performSingleLastClick(int runGeneration) {
-
-        if (!running || runGeneration != generation) {
-            return;
-        }
-
-        gestureInProgress = true;
-
-        boolean accepted = dispatchTouch(
-                touchDurationMillis,
-                completed -> {
-
-                    if (runGeneration != generation || !running) {
-                        return;
-                    }
-
-                    gestureInProgress = false;
-
-                    if (completed) {
-                        currentLoopClicks++;
-
-                        finishCurrentLoop(
-                                runGeneration,
-                                "چرخه آخر؛ یک کلیک انجام شد"
-                        );
-
-                    } else {
-                        finishCurrentLoop(
-                                runGeneration,
-                                "خطا در کلیک چرخه آخر"
-                        );
-                    }
-                }
-        );
-
-        if (!accepted) {
-            gestureInProgress = false;
-
-            finishCurrentLoop(
-                    runGeneration,
-                    "خطا در ارسال کلیک چرخه آخر"
-            );
-        }
-    }
-
     private void finishCurrentLoop(
             int runGeneration,
             String reason
     ) {
 
-        if (!running || runGeneration != generation) {
+        if (!running ||
+                runGeneration != generation ||
+                currentLoopFinished) {
             return;
         }
 
+        currentLoopFinished = true;
         removePendingClick();
+
+        if (pendingLoopDeadlineRunnable != null) {
+            handler.removeCallbacks(pendingLoopDeadlineRunnable);
+            pendingLoopDeadlineRunnable = null;
+        }
 
         long endElapsed = SystemClock.elapsedRealtime();
         long endWall = System.currentTimeMillis();
@@ -992,14 +1109,25 @@ public class ClickService extends AccessibilityService {
                 "مدت واقعی: " +
                 formatDuration(actualDuration * 1_000_000L) + "\n" +
                 "تعداد کلیک تکمیل‌شده: " + currentLoopClicks + "\n" +
+                (currentLoopIsConfiguredLast && currentLoopHasClickLimit
+                        ? "هدف کلیک چرخه آخر: " + currentLoopClickLimit + "\n"
+                        : "") +
                 "وضعیت: " + reason;
 
         addReport(report);
 
+        if (Long.MAX_VALUE - previousLoopsClickTotal < currentLoopClicks) {
+            previousLoopsClickTotal = Long.MAX_VALUE;
+        } else {
+            previousLoopsClickTotal += currentLoopClicks;
+        }
+
+        boolean wasConfiguredLast = currentLoopIsConfiguredLast;
+
         completedLoops++;
         currentLoopClicks = 0;
 
-        if (currentLoopIsLastSingle) {
+        if (wasConfiguredLast) {
             finishAll("پایان اجرای چرخه آخر");
             return;
         }
@@ -1096,6 +1224,11 @@ public class ClickService extends AccessibilityService {
     }
 
     private void cancelPendingActions() {
+
+        if (pendingLoopDeadlineRunnable != null) {
+            handler.removeCallbacks(pendingLoopDeadlineRunnable);
+            pendingLoopDeadlineRunnable = null;
+        }
 
         if (pendingStartRunnable != null) {
             handler.removeCallbacks(pendingStartRunnable);
@@ -2211,8 +2344,10 @@ public class ClickService extends AccessibilityService {
                         this,
                         android.R.layout.simple_spinner_item,
                         new String[]{
-                                "چرخه آخر: اجرای عادی",
-                                "چرخه آخر: فقط یک کلیک"
+                                "چرخه آخر: اجرای عادی تا پایان زمان",
+                                "چرخه آخر: فقط یک کلیک تا پایان زمان",
+                                "چرخه آخر: مجموع کلیک‌های چرخه‌های قبلی",
+                                "چرخه آخر: تعداد کلیک دلخواه"
                         }
                 );
 
@@ -2228,6 +2363,12 @@ public class ClickService extends AccessibilityService {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         dp(48)
                 )
+        );
+
+        pLastLoopCustomCount = panelField(
+                parent,
+                "تعداد کلیک دلخواه چرخه آخر (فقط در حالت تعداد دلخواه)",
+                "100"
         );
 
         Button start = smallButton("شروع با تنظیمات پنل");
@@ -2322,8 +2463,13 @@ public class ClickService extends AccessibilityService {
         long interval = readNumber(pInterval, 200);
         long touch = readNumber(pTouch, 20);
 
-        boolean singleLast =
-                pLastLoopSpinner.getSelectedItemPosition() == 1;
+        int lastLoopMode =
+                pLastLoopSpinner == null
+                        ? LAST_LOOP_NORMAL
+                        : pLastLoopSpinner.getSelectedItemPosition();
+
+        long customLastLoopClicks =
+                readNumber(pLastLoopCustomCount, 100);
 
         boolean useTsetmc =
                 pClockBasisSpinner != null &&
@@ -2341,9 +2487,18 @@ public class ClickService extends AccessibilityService {
                 count < 0 ||
                 interval < 1 ||
                 touch < 1 ||
+                lastLoopMode < LAST_LOOP_NORMAL ||
+                lastLoopMode > LAST_LOOP_CUSTOM ||
+                (lastLoopMode == LAST_LOOP_CUSTOM &&
+                        customLastLoopClicks < 1) ||
+                (count == 0 && lastLoopMode != LAST_LOOP_NORMAL) ||
                 loopSec * 1000L + loopMs <= 0) {
 
-            showToast("یکی از مقادیر تنظیمات معتبر نیست.");
+            showToast(
+                    count == 0 && lastLoopMode != LAST_LOOP_NORMAL
+                            ? "برای تنظیم چرخه آخر، تعداد کل چرخه‌ها باید مشخص باشد."
+                            : "یکی از مقادیر تنظیمات معتبر نیست."
+            );
             return;
         }
 
@@ -2354,7 +2509,8 @@ public class ClickService extends AccessibilityService {
                 count,
                 interval,
                 touch,
-                singleLast,
+                lastLoopMode,
+                customLastLoopClicks,
                 useTsetmc
         );
     }
@@ -2437,8 +2593,19 @@ public class ClickService extends AccessibilityService {
                                         SystemClock.elapsedRealtime()
                         );
 
-                        if (currentLoopIsLastSingle) {
-                            countdownText.setText("چرخه آخر: یک کلیک");
+                        if (currentLoopIsConfiguredLast &&
+                                currentLoopHasClickLimit) {
+
+                            countdownText.setText(
+                                    "چرخه آخر: " +
+                                            currentLoopClicks + "/" +
+                                            currentLoopClickLimit +
+                                            " | زمان: " +
+                                            formatDuration(
+                                                    remaining * 1_000_000L
+                                            )
+                            );
+
                         } else {
                             countdownText.setText(
                                     "باقی‌مانده چرخه: " +
