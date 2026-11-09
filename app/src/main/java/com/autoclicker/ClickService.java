@@ -1017,9 +1017,6 @@ public class ClickService extends AccessibilityService {
         nextClickNumber = 0;
         gestureInProgress = false;
 
-        // بهینه‌سازی سرعت: در کل اجرای لوپی، پنل و نشانگر یک‌بار
-        // از مسیر لمس خارج می‌شوند؛ نه اینکه برای هر کلیک دوباره تغییر کنند.
-        disableOverlayTouchability();
         currentLoopFinished = false;
         currentLoopDeadlineReached = false;
 
@@ -1339,7 +1336,6 @@ public class ClickService extends AccessibilityService {
         running = false;
         waitingForStart = false;
         gestureInProgress = false;
-        restoreOverlayTouchability();
 
         cancelPendingActions();
 
@@ -1499,9 +1495,7 @@ public class ClickService extends AccessibilityService {
                                 }
                                 delivered = true;
                                 touchInFlight = false;
-                                if (!running) {
-                                    restoreOverlayTouchability();
-                                }
+                                restoreOverlayTouchability();
                                 if (result != null) {
                                     result.onFinished(completed);
                                 }
@@ -1526,9 +1520,7 @@ public class ClickService extends AccessibilityService {
 
             if (!accepted && thisTouchGeneration == touchGeneration) {
                 touchInFlight = false;
-                if (!running) {
-                    restoreOverlayTouchability();
-                }
+                restoreOverlayTouchability();
                 if (result != null) {
                     result.onFinished(false);
                 }
